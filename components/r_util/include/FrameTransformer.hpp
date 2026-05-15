@@ -3,6 +3,8 @@
 
 namespace Utils {
 
+enum class CoordSystem { NED, ENU };
+
 enum class SensorRotation {
     ROTATION_NONE,        // 기체 정면과 칩 정면이 일치
     YAW_90,               // 시계방향 90도 회전 장착
@@ -13,6 +15,8 @@ enum class SensorRotation {
 };
 
 class FrameTransformer {
+private:
+    static constexpr const char* TAG = "FrameTransformer";    
 public:
     // 단독 유틸리티 함수로 선언하여 객체 생성 없이도 쓸 수 있게 설계
     static void align_to_body(ImuData& src, SensorRotation rotation) {
@@ -25,7 +29,23 @@ public:
         src.acc = aligned_acc;
         src.gyro = aligned_gyro;
     }
+    /**
+     * @brief 순수 센서 데이터를 상위 제어기가 원하는 목적 좌표계로 정렬 및 부호 변환합니다.
+     * @param src 센서 칩에서 갓 읽어온 순수 변환 데이터 (물리 단위 완료 상태)
+     * @param target_system 상위 칼만/PID가 사용하는 좌표계 (NED 또는 ENU)
+     */
+    static void convert_to(ImuData& src, CoordSystem target_system) {
+          float rx = src.acc.x;  float ry = src.acc.y;  float rz = src.acc.z;
+        float gx = src.gyro.x; float gy = src.gyro.y; float gz = src.gyro.z;
 
+        if (target_system == CoordSystem::NED) {
+            src.acc  = Vector3f(rx, -ry, -rz);
+            src.gyro = Vector3f(gx, -gy, -gz);
+        } else if (target_system == CoordSystem::ENU) {
+            src.acc  = Vector3f(-ry, rx, rz);
+            src.gyro = Vector3f(-gy, gx, gz);
+        }
+    }
 private:
     static Vector3f transform_vector(const Vector3f& vec, SensorRotation rotation) {
         Vector3f out = vec;

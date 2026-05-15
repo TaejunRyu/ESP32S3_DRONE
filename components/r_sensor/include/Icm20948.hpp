@@ -15,7 +15,7 @@ namespace Sensor{
 class ICM20948 : public Interface::IImuSensor{
     private:
         static constexpr const char* TAG = "ICM20948";
-        enum class CoordSystem { NED, ENU };
+
 
     public:
         ~ICM20948();
@@ -33,7 +33,6 @@ class ICM20948 : public Interface::IImuSensor{
         esp_err_t deinitialize()  override;
         bool is_initialized() { return _initialized; }
         esp_err_t updateSample(ImuData& sample) override;
-        void convertToCoordinate(ImuData& src, CoordSystem target);
 
     private:
         

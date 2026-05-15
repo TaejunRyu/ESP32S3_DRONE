@@ -7,6 +7,8 @@
 namespace Utils {
 
 class AutoCalibrator {
+private:
+    static constexpr const char* TAG = "AutoCalibrator";    
 public:
     /**
      * @brief 기체가 수평인 상태에서 센서 고유의 리딩 값을 받아와 장착 방향을 역추적합니다.

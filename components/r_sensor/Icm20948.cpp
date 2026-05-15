@@ -48,53 +48,55 @@ esp_err_t ICM20948::read_data(ImuData &raw){
     if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        
     
     esp_err_t err;
-    Vector3f acc,gyro;
     select_bank(0);
 
-    // [구분 처리] I2C vs SPI
     if (_ibus->get_type() == Interface::BusType::I2C) {
-        // I2C일 때는 기존처럼 Accel + Gyro (12바이트)만 읽음
+        // I2C 모드: 기본 12바이트 리딩 및 플래그 비활성화
         uint8_t d[12];
         err = _ibus->Read(B0_ACCEL_XOUT_H, d, 12);
         if (err != ESP_OK) return err;
 
-        acc.x = (int16_t)((d[0] << 8) | d[1]) / ACCEL_SENSITIVITY;
-        acc.y = (int16_t)((d[2] << 8) | d[3]) / ACCEL_SENSITIVITY;
-        acc.z = (int16_t)((d[4] << 8) | d[5]) / ACCEL_SENSITIVITY;
+        raw.acc.x = (int16_t)((d[0] << 8) | d[1]) / ACCEL_SENSITIVITY;
+        raw.acc.y = (int16_t)((d[2] << 8) | d[3]) / ACCEL_SENSITIVITY;
+        raw.acc.z = (int16_t)((d[4] << 8) | d[5]) / ACCEL_SENSITIVITY;
 
-        gyro.x = (int16_t)((d[6] << 8) | d[7])  / GYRO_SENSITIVITY;
-        gyro.y = (int16_t)((d[8] << 8) | d[9])  / GYRO_SENSITIVITY;
-        gyro.z = (int16_t)((d[10] << 8) | d[11])/ GYRO_SENSITIVITY;
-        raw.acc  = acc;
-        raw.gyro = gyro;
+        raw.gyro.x = (int16_t)((d[6] << 8) | d[7])  / GYRO_SENSITIVITY;
+        raw.gyro.y = (int16_t)((d[8] << 8) | d[9])  / GYRO_SENSITIVITY;
+        raw.gyro.z = (int16_t)((d[10] << 8) | d[11]) / GYRO_SENSITIVITY;
+        
         raw.timestamp = esp_timer_get_time();
+        raw.is_mag_updated = false; // I2C 바이패스/마스터 설정을 별도로 부팅 시 완료하지 않았다면 무시
     } 
     else {
-        // SPI일 때는 Mag 포함 (21바이트) 읽음 (Accel 6 + Gyro 6 + Temp 2 + Mag 7)
-        // 0x2D(Accel_X) ~ 0x41(Mag_Status2)까지 연속 읽기
-        uint8_t d[21];
-        err = _ibus->Read(B0_ACCEL_XOUT_H, d, 21);
+        // SPI 모드: 가속도6 + 자이로6 + 온도2 + 지자계데이터 패킷 연속 리딩 영역
+        // AK09916의 ST1(Status1) 레지스터가 매핑된 버퍼 위치를 d[14]라고 가정 (하드웨어 매핑 스펙 기준)
+        uint8_t d[22]; 
+        err = _ibus->Read(B0_ACCEL_XOUT_H, d, 22);
         if (err != ESP_OK) return err;
 
-        // Accel & Gyro 변환 (기존과 동일)
-        acc.x = (int16_t)((d[0] << 8) | d[1]) / 4096.0f;
-        acc.y = (int16_t)((d[2] << 8) | d[3]) / 4096.0f;
-        acc.z = (int16_t)((d[4] << 8) | d[5]) / 4096.0f;
-
-        gyro.x = (int16_t)((d[6] << 8) | d[7]) / 32.8f;
-        gyro.y = (int16_t)((d[8] << 8) | d[9]) / 32.8f;
-        gyro.z = (int16_t)((d[10] << 8) | d[11]) / 32.8f;
-
-        raw.acc  = acc;
-        raw.gyro = gyro;
+        // 가속도 및 자이로 물리 변환
+        raw.acc.x = (int16_t)((d[0] << 8) | d[1]) / ACCEL_SENSITIVITY;
+        raw.acc.y = (int16_t)((d[2] << 8) | d[3]) / ACCEL_SENSITIVITY;
+        raw.acc.z = (int16_t)((d[4] << 8) | d[5]) / ACCEL_SENSITIVITY;
+        raw.gyro.x = (int16_t)((d[6] << 8) | d[7]) / GYRO_SENSITIVITY;
+        raw.gyro.y = (int16_t)((d[8] << 8) | d[9]) / GYRO_SENSITIVITY;
+        raw.gyro.z = (int16_t)((d[10] << 8) | d[11]) / GYRO_SENSITIVITY;
         raw.timestamp = esp_timer_get_time();
 
-        // 지자계 데이터 변환 (d[14]부터 Mag 데이터 시작)
-        // AK09916 데이터 포맷: Little-Endian 방식 주의
-        // d[14]: ST1, d[15]: HXL, d[16]: HXH, ... d[20]: ST2
-        _mag.x = (int16_t)((d[16] << 8) | d[15]) * 0.15f; // uT 단위 변환
-        _mag.y = (int16_t)((d[18] << 8) | d[17]) * 0.15f;
-        _mag.z = (int16_t)((d[20] << 8) | d[19]) * 0.15f;
+        // ★ [핵심 방어] 지자계 Data Ready(DRDY) 비트 검사
+        uint8_t st1 = d[14]; // AK09916 ST1 레지스터 위치
+        if (st1 & 0x01) {    // DRDY 비트가 1인 경우 = '하드웨어적으로 진짜 새 지자계가 확보됨'
+            raw.is_mag_updated = true;
+            raw.mag_timestamp = raw.timestamp;
+
+            // 지자계 Little-Endian 패킷 파싱 (d[15]부터 마그네토미터 데이터 시작 가정)
+            raw.mag.x = (int16_t)((d[16] << 8) | d[15]) * 0.15f; 
+            raw.mag.y = (int16_t)((d[18] << 8) | d[17]) * 0.15f;
+            raw.mag.z = (int16_t)((d[20] << 8) | d[19]) * 0.15f;
+        } else {
+            // 이번 고속 루프 주기에 새 지자계가 없으면 갱신 패스 알림
+            raw.is_mag_updated = false;
+        }
     }
     return err;
 }
@@ -107,43 +109,42 @@ esp_err_t ICM20948::read_data(ImuData &raw){
  */
 esp_err_t ICM20948::updateSample(ImuData &sample)
 {    
+      // 1. 하드웨어 버스 연결 상태 방어적 체크
     if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        
-    ImuData data;
-    esp_err_t err = read_data(data);
+    
+    ImuData data = {}; // 임시 버퍼 초기화
+    esp_err_t err = read_data(data); // 칩 레지스터 일괄 리딩 (내부에서 mag 데이터 및 플래그 갱신됨)
+    
+    // 2. 통신이 완벽하게 성공한 경우에만 상위 객체로 데이터 복사
     if (err == ESP_OK){
-        // 주가되어질 항목 
-        // 1. ENU방식으로 처리할것인가 NED방식으로 처리 할것인가에 따라 부호결정
-        // 2. ENU로 갈 경우 KALMAN/ PID / QGC에서 처리방향 정리 할것
-        // 3. NED로 갈 경우 KALMAN/ PID / QGC에서 처리방향 정리 할것
-        // 4. 방향 설정되면 부호를 여기서 처리 할거라면 ENU 방식과 NED방식의 변경 함수를 만들어서 처리 할것.
-        sample.acc = data.acc;
-        sample.gyro = data.gyro;
+        // [기본 IMU 데이터 전달]
+        sample.acc         = data.acc;
+        sample.gyro        = data.gyro;
         sample.temperature = data.temperature;
-        sample.timestamp = data.timestamp;
+        sample.timestamp   = data.timestamp;
+
+        // ★ [핵심 추가] 새로 보완된 지자계(Mag) 관련 데이터 체인 연결
+        sample.mag            = data.mag;
+        sample.mag_timestamp  = data.mag_timestamp;
+        sample.is_mag_updated = data.is_mag_updated; // 느린 지자계 지터 방어 플래그 토스
     }
+    
     return err;
 }
 
-void ICM20948::convertToCoordinate(ImuData &src, CoordSystem target)
-{
-    if (target == CoordSystem::NED) {
-        // 이미 칩 자체가 북-동-아래(NED) 기준으로 안착되어 있다면 유지
-        // 칩 장착 방향에 따라 축 반전이 필요하면 여기서 일괄 처리
-        // 예시: 보드가 뒤집혀 장착된 경우 src.acc.z = -src.acc.z;
-    } else if (target == CoordSystem::ENU) {
-        // ENU 변환 공식 적용 (X -> Y, Y -> X, Z -> -Z 변환 등 적용)
-        float temp_x = src.acc.x;
-        src.acc.x = src.acc.y;     // East
-        src.acc.y = temp_x;        // North
-        src.acc.z = -src.acc.z;    // Up
-        
-        // 자이로도 동일하게 회전 방향 축 매핑 변경
-        float temp_gx = src.gyro.x;
-        src.gyro.x = src.gyro.y;
-        src.gyro.y = temp_gx;
-        src.gyro.z = -src.gyro.z;
-    }
-}
+// // 메인 제어 루프 예시
+// ImuData current_drone_data;
+// if (icm20948.updateSample(current_drone_data) == ESP_OK) {
+//     // 1. 필터로 노이즈와 오차 제거
+//     calibrator.apply_filter(current_drone_data); 
+
+//     // 2. 상위 연산이 원하는 좌표계(예: ENU)로 통일 변환
+//     Utils::FrameTransformer::convert_to(current_drone_data, Utils::TargetCoord::ENU);
+
+//     // 3. 지자계 갱신 플래그(is_mag_updated)를 보고 칼만 필터의 보정 연산 여부 안전하게 분기 제어!
+// }
+
+
 
 esp_err_t ICM20948::initialize()
 {

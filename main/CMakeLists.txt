@@ -8,4 +8,5 @@ idf_component_register(
         r_control
         r_sensor
         r_driver
+        r_service
 )
