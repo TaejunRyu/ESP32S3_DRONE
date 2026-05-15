@@ -6,6 +6,8 @@
 #include <freertos/task.h>
 #include <esp_timer.h>
 
+namespace Sensor{
+
 static const char* TAG = "ICM20948";
 
 ICM20948::ICM20948(spi_host_device_t spiHost, gpio_num_t csPin, int spiClockHz) 
@@ -97,3 +99,5 @@ bool ICM20948::updateSample(ImuData& sample) {
     sample.timestamp = esp_timer_get_time();
     return true;
 }
+
+} //namespace Sensor
