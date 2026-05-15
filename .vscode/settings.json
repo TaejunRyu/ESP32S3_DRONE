@@ -14,5 +14,6 @@
     "--background-index",
     "--query-driver=**",
     "--compile-commands-dir=/home/ryuwillow/Document/Projects/ESP32S3_Drone/build"
-  ]
+  ],
+  "idf.flashType": "JTAG"
 }
