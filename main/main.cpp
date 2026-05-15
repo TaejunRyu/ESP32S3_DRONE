@@ -2,18 +2,31 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-
+#include "BusInterface.hpp"
+#include "Icm20948.hpp"
+#include "VirtualSendor.hpp"
+#include "spi.hpp"
 
 
 extern "C"  void app_main(void)
 {
+    Driver::SPI::get_instance().initialize();
+    
+
+
+    Sensor::VirtualIMU vimu;
+    vimu.initialize();
+    
+
 
     ESP_LOGI("MAIN","시작....");
-
+    ImuData data;
+  
     while(true){
+        vimu.updateSample(data);
+        ESP_LOGI("MAIN","AX: %10.5f AY: %10.5f AZ: %10.5f",data.acc.x,data.acc.y,data.acc.z);
 
-
-        vTaskDelay( pdMS_TO_TICKS(1000));
+        vTaskDelay( pdMS_TO_TICKS(100));
     }
 
 }

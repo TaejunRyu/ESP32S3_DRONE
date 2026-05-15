@@ -21,6 +21,13 @@ struct Vector3f {
     Vector3f operator*(float scalar) const {
         return Vector3f(x * scalar, y * scalar, z * scalar);
     }
+    Vector3f operator=(const Vector3f& other) const {
+        return Vector3f(other.x,other.y,other.z);
+    }
+    Vector3f operator=(float scalar) const {
+        return Vector3f( scalar, scalar, scalar);
+    }
+
 };
 
 // 2. 오일러 각도 기반 드론 자세 데이터
@@ -45,4 +52,6 @@ struct ImuData {
     Vector3f    gyro;               // 자이로 데이터 (deg/s 또는 rad/s)
     float       temperature = 0.0f; // 센서 온도 (필요 시)
     uint64_t    timestamp = 0;      // 데이터 획득 시간 (FreeRTOS 틱 또는 마이크로초)
+
+
 };

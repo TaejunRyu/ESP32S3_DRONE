@@ -5,99 +5,175 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_timer.h>
+#include "BusInterface.hpp"
 
 namespace Sensor{
 
-static const char* TAG = "ICM20948";
+    esp_err_t ICM20948::init_bus(Interface::IBus *bus)
+{
+    if (!bus) return ESP_FAIL;
 
-ICM20948::ICM20948(spi_host_device_t spiHost, gpio_num_t csPin, int spiClockHz) 
-    : _csPin(csPin), _currentBank(0xFF) {
+    if (_ibus) delete _ibus; // 기존에 할당된 버스가 있다면 해제
+    _ibus = bus;            // 새로 생성된 I2CBus 또는 SPIBus 주입
     
-    // SPI 장치 설정 및 등록
-    spi_device_interface_config_t devCfg = {};
-    devCfg.clock_speed_hz = spiClockHz;
-    devCfg.mode = 3;  // SPI Mode 3 (ICM20948 규격)
-    devCfg.spics_io_num = _csPin;
-    devCfg.queue_size = 7;
-    
-    spi_bus_add_device(spiHost, &devCfg, &_spiHandle);
+    return ESP_OK;
 }
 
-ICM20948::~ICM20948() {
-    spi_bus_remove_device(_spiHandle);
+esp_err_t ICM20948::select_bank(uint8_t bank){
+    esp_err_t err = ESP_FAIL;
+    if (_ibus == nullptr) return err;
+    err = _ibus->Write(REG_BANK_SEL,(uint8_t)(bank << 4));
+    return err;
 }
 
-void ICM20948::selectBank(uint8_t bank) {
-    if (_currentBank == bank) return;
-    // 모든 뱅크의 0x7F 레지스터는 REG_BANK_SEL 임
-    uint8_t regAddr = 0x7F;
-    uint8_t data = (bank << 4);
+
+esp_err_t ICM20948::read_data(ImuData &raw){
+    if (_ibus == nullptr) return ESP_FAIL;        
     
-    spi_transaction_t t = {};
-    t.length = 8;
-    t.tx_buffer = &data;
-    // 저수준 SPI 전송 코드 수행...
-    _currentBank = bank;
+    esp_err_t err;
+    Vector3f acc,gyro;
+    select_bank(0);
+
+    // [구분 처리] I2C vs SPI
+    if (_ibus->get_type() == Interface::BusType::I2C) {
+        // I2C일 때는 기존처럼 Accel + Gyro (12바이트)만 읽음
+        uint8_t d[12];
+        err = _ibus->Read(B0_ACCEL_XOUT_H, d, 12);
+        if (err != ESP_OK) return err;
+
+        acc.x = (int16_t)((d[0] << 8) | d[1]) / 4096.0f;
+        acc.y = (int16_t)((d[2] << 8) | d[3]) / 4096.0f;
+        acc.z = (int16_t)((d[4] << 8) | d[5]) / 4096.0f;
+
+        gyro.x = (int16_t)((d[6] << 8) | d[7]) / 32.8f;
+        gyro.y = (int16_t)((d[8] << 8) | d[9]) / 32.8f;
+        gyro.z = (int16_t)((d[10] << 8) | d[11]) / 32.8f;
+        raw.acc  = acc;
+        raw.gyro = gyro;
+        raw.timestamp = esp_timer_get_time();
+    } 
+    else {
+        // SPI일 때는 Mag 포함 (21바이트) 읽음 (Accel 6 + Gyro 6 + Temp 2 + Mag 7)
+        // 0x2D(Accel_X) ~ 0x41(Mag_Status2)까지 연속 읽기
+        uint8_t d[21];
+        err = _ibus->Read(B0_ACCEL_XOUT_H, d, 21);
+        if (err != ESP_OK) return err;
+
+        // Accel & Gyro 변환 (기존과 동일)
+        acc.x = (int16_t)((d[0] << 8) | d[1]) / 4096.0f;
+        acc.y = (int16_t)((d[2] << 8) | d[3]) / 4096.0f;
+        acc.z = (int16_t)((d[4] << 8) | d[5]) / 4096.0f;
+
+        gyro.x = (int16_t)((d[6] << 8) | d[7]) / 32.8f;
+        gyro.y = (int16_t)((d[8] << 8) | d[9]) / 32.8f;
+        gyro.z = (int16_t)((d[10] << 8) | d[11]) / 32.8f;
+
+        raw.acc  = acc;
+        raw.gyro = gyro;
+        raw.timestamp = esp_timer_get_time();
+
+        // 지자계 데이터 변환 (d[14]부터 Mag 데이터 시작)
+        // AK09916 데이터 포맷: Little-Endian 방식 주의
+        // d[14]: ST1, d[15]: HXL, d[16]: HXH, ... d[20]: ST2
+        _mag.x = (int16_t)((d[16] << 8) | d[15]) * 0.15f; // uT 단위 변환
+        _mag.y = (int16_t)((d[18] << 8) | d[17]) * 0.15f;
+        _mag.z = (int16_t)((d[20] << 8) | d[19]) * 0.15f;
+    }
+    return err;
 }
 
-bool ICM20948::initialize() {
-    // 1. 디바이스 소프트 리셋
-    selectBank(0);
-    writeRegister(0x06, 0x80); // PWR_MGMT_1 리셋
-    vTaskDelay(pdMS_TO_TICKS(100));
-    writeRegister(0x06, 0x01); // 자동 시계원 선택
-    
-    // 2. WHO_AM_I 검증 (ICM20948의 기본 ID는 0xEA)
-    uint8_t whoAmI = 0;
-    readRegisters(0x00, &whoAmI, 1);
-    if (whoAmI != 0xEA) {
-        ESP_LOGE(TAG, "Failed to connect to ICM20948! ID: 0x%02X", whoAmI);
-        return false;
+/**
+ * @brief 
+ * @param sample 
+ * @return true 
+ * @return false 
+ */
+bool ICM20948::updateSample(ImuData &sample)
+{    
+    if (_ibus == nullptr) return false;        
+    ImuData data;
+    esp_err_t err = read_data(data);
+    if (err != ESP_OK){
+        sample.acc = data.acc;
+        sample.gyro = data.gyro;
+        sample.temperature = data.temperature;
+        sample.timestamp = data.timestamp;
+        return true;
+    }
+    return false;
+}
+
+esp_err_t ICM20948::initialize()
+{
+    if (_initialized) {
+        ESP_LOGI(TAG, "Already initialized.");
+        return ESP_OK;
     }
 
-    // 3. 지자계 센서(AK09916) 연동을 위한 내장 I2C Master 활성화
-    initAuxI2CMaster();
+    // [중요] _bus가 외부에서 주입(set_bus)되었는지 먼저 확인합니다.
+    if (_ibus == nullptr) {
+        ESP_LOGE(TAG, "Bus interface not set!");
+        return ESP_FAIL;
+    }
 
-    return true;
+    esp_err_t err;
+
+    // 0. 초기 뱅크 설정
+    select_bank(0);
+
+    // 1. Soft Reset
+    // 기존: i2c_master_transmit(_dev_handle, reset_cmd, 2, ...)
+    // 변경: 인터페이스의 write(레지스터, 데이터) 사용
+    err = _ibus->Write(B0_PWR_MGMT_1, 0x80); 
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Soft Reset setting failed");
+        return err;
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // 2. Sleep 해제 및 Auto Clock 선택
+    err = _ibus->Write(B0_PWR_MGMT_1, 0x01);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Sleep & Auto Clock setting failed");
+        return err;
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // --- [Bank 2로 이동] ---
+    select_bank(2);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // --- [자이로스코프 설정] ---
+    err = _ibus->Write(B2_GYRO_CONFIG_1, 0x1D);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Gyro DLPF setting failed");
+        return err;
+    }
+
+    // --- [가속도계 설정] ---
+    err = _ibus->Write(B2_ACCEL_CONFIG, 0x1D);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Accel DLPF setting failed");
+        return err;
+    }
+
+    // --- [Bank 0로 복귀] ---
+    select_bank(0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    _initialized = true;
+    ESP_LOGI(TAG, "Initialized successfully via Interface.");
+    return ESP_OK;
 }
 
-void ICM20948::initAuxI2CMaster() {
-    selectBank(0);
-    writeRegister(0x03, 0x20); // USER_CTRL: I2C_MST_EN 활성화
-    
-    selectBank(3);
-    writeRegister(0x01, 0x0D); // I2C_MST_CTRL: 400kHz 세팅
-    
-    // AK09916 리셋 및 연속 측정 모드 진입 명령 주입
-    writeAK09916(0x31, 0x01); // CNTL2: 100Hz 연속 측정 모드
-    
-    // ICM20948이 주기적으로 AK09916의 데이터를 자동으로 읽어 가도록 Slave0 자동 갱신 지정
-    writeRegister(0x03, 0x8C); // I2C_SLV0_ADDR: Read 모드 + AK09916 주소(0x0C)
-    writeRegister(0x04, 0x11); // I2C_SLV0_REG: AK09916 데이터 시작 레지스터 (HXL)
-    writeRegister(0x05, 0x89); // I2C_SLV0_CTRL: Enable + 9바이트 읽기 (ST1부터 ST2까지 한 번에 읽어야 락 해제됨)
-}
-
-bool ICM20948::updateSample(ImuData& sample) {
-    uint8_t rawBuf[14 + 9]; // Accel(6) + Gyro(6) + Temp(2) + Mag(9)
-    
-    // 1. 가속도/자이로 읽기 (Bank 0)
-    selectBank(0);
-    readRegisters(0x2D, rawBuf, 14); // ACCEL_XOUT_H 부터 읽기 시작
-    
-    // 2. 자동 파싱 및 환산 (Vector3D 연산자 오버로딩 구조 활용)
-    int16_t ax = (rawBuf[0] << 8) | rawBuf[1];
-    int16_t ay = (rawBuf[2] << 8) | rawBuf[3];
-    int16_t az = (rawBuf[4] << 8) | rawBuf[5];
-    
-    // 민감도 상수를 곱해 g단위 또는 m/s^2 단위의 float 벡터로 변환
-    sample.acc = Vector3f(ax / 16384.0f, ay / 16384.0f, az / 16384.0f); // ±2g 기준
-    
-    // 3. I2C Slave0에 매핑되어 상시 자동 갱신 중인 Mag 데이터 읽기
-    readRegisters(0x3B, &rawBuf[14], 9); // EXT_SLV_SENS_DATA_00 레지스터 영역
-    
-    // 시간 정보 기입
-    sample.timestamp = esp_timer_get_time();
-    return true;
+esp_err_t ICM20948::deinitialize(){
+    if (!_initialized) {
+        return ESP_OK;
+    }
+    _ibus = nullptr; 
+    _initialized = false;
+    ESP_LOGI(TAG, "Deinitialized successfully (Interface detached).");
+    return ESP_OK;
 }
 
 } //namespace Sensor

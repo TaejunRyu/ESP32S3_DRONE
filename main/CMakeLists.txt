@@ -7,4 +7,5 @@ idf_component_register(
     REQUIRES 
         r_control
         r_sensor
+        r_driver
 )
