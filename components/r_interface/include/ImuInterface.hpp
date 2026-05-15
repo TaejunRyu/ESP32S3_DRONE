@@ -23,7 +23,7 @@ public:
      * @param sample 데이터를 저장할 구조체 참조자
      * @return true 갱신 성공, false 실패
      */
-    virtual bool updateSample(ImuData& sample) = 0;
+    virtual esp_err_t updateSample(ImuData& sample) = 0;
 };
 
 

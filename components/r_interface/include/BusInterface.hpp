@@ -23,6 +23,8 @@ class SPIBus : public IBus {
 private:
     spi_device_handle_t _handle;
 public:
+    SPIBus(const SPIBus&) = delete;
+    SPIBus& operator=(const SPIBus&) = delete;
     SPIBus(spi_device_handle_t handle) : _handle(handle) {}
     ~SPIBus() override { if (_handle) spi_bus_remove_device(_handle); } // 리소스 해제 추가
     BusType get_type() const override { return BusType::SPI; }
@@ -52,6 +54,9 @@ class I2CBus : public IBus {
     private:
         i2c_master_dev_handle_t _handle;
     public:
+        I2CBus(const I2CBus&) = delete;
+        I2CBus& operator=(const I2CBus&) = delete;
+
         I2CBus(i2c_master_dev_handle_t handle) : _handle(handle) {}
         ~I2CBus() override { if (_handle) i2c_master_bus_rm_device(_handle); }
         BusType get_type() const override { return BusType::I2C; }
