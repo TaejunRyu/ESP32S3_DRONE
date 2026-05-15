@@ -1,0 +1,1 @@
+1. QGroundControl과 Communication을 위한 정의
