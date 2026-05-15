@@ -6,7 +6,7 @@
 
 class ICM20948 : public ImuInterface{
 private:
-    spi_device_handle_t _spiHandle;
+    spi_device_handle_t _spiHandle;    
     gpio_num_t _csPin;
     
     // ICM20948의 레지스터 뱅크 관리를 위한 현재 상태 변수
