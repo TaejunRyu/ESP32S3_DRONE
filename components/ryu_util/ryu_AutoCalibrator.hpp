@@ -1,3 +1,14 @@
+/**
+ * @file ryu_AutoCalibrator.hpp
+ * @author your name (you@domain.com)
+ * @brief 
+ *      1. 자동으로 알아서 센서의 방향을 잡는다.
+ * @version 0.1
+ * @date 2026-05-16
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
 #pragma once
 #include <cmath>
 #include <esp_log.h>

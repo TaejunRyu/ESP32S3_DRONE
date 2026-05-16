@@ -1,3 +1,14 @@
+/**
+ * @file ryu_AngleTranformer.hpp
+ * @author your name (you@domain.com)
+ * @brief 
+ *      1. EULER 각도를 ENU와 NED로 서로 변경할때 사용.
+ * @version 0.1
+ * @date 2026-05-16
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
 #pragma once
 #include <cmath>
 #include "DroneTypes.hpp"

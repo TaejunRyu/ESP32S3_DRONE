@@ -7,8 +7,8 @@
 static const char* TAG = "DRONE";
 
 
-extern "C"  void app_main(void)
-{
+extern "C"  void app_main(void){
+
     ESP_LOGI(TAG, "=== 드론 하드웨어 HAL 테스트 시작 ===");
     Control::Flight _flight;
     _flight.start_task();
@@ -17,7 +17,6 @@ extern "C"  void app_main(void)
     while(true){
         vTaskDelay( pdMS_TO_TICKS(100));
     }
-
 }
 
 

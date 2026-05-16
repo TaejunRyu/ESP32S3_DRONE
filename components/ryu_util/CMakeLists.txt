@@ -7,5 +7,6 @@ idf_component_register(
 
     REQUIRES
         log
+        ryu_system
     
 )
