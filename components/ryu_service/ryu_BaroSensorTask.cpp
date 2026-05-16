@@ -1,4 +1,4 @@
-#include "BaroSensorTask.hpp"
+#include "ryu_BaroSensorTask.hpp"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -6,7 +6,7 @@
 #include "esp_timer.h"
 #include "ryu_DroneTypes.hpp"
 #include "Icm20948.hpp"
-#include "SharedDataManager.hpp"
+#include "ryu_SharedDataManager.hpp"
 
 static const char* TAG = "SENSOR_TASK";
 

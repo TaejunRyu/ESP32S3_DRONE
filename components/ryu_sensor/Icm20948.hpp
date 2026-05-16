@@ -4,7 +4,7 @@
 #include <driver/spi_master.h>
 #include <driver/gpio.h>
 
-#include "ImuInterface.hpp"
+#include "ryu_ImuInterface.hpp"
 
 namespace Interface{
     class IBus;

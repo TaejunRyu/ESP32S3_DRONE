@@ -2,11 +2,11 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include "BusInterface.hpp"
 #include "Icm20948.hpp"
 #include "VirtualSendor.hpp"
+#include "ryu_BusInterface.hpp"
 #include "ryu_spi.hpp"
-#include "SharedDataManager.hpp"
+#include "ryu_SharedDataManager.hpp"
 
 static const char* TAG = "MAIN_TEST";
 

@@ -5,8 +5,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_timer.h>
-#include "BusInterface.hpp"
-#include "DroneConfig.hpp"
+#include "ryu_BusInterface.hpp"
+#include "ryu_DroneConfig.hpp"
 
 
 namespace Sensor{
