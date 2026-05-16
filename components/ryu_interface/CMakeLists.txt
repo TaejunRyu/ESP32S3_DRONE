@@ -3,7 +3,7 @@ file(GLOB_RECURSE SOURCES "*.cpp") # 폴더 내 모든 cpp 파일을 SOURCES 변
 idf_component_register(
     SRCS ${SOURCES}
     INCLUDE_DIRS 
-        "include"  
+        "."  
 
     REQUIRES
         esp_timer 

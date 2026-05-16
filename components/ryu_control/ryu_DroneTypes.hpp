@@ -1,3 +1,15 @@
+/**
+ * @file ryu_DroneTypes.hpp
+ * @author your name (you@domain.com)
+ * @brief 
+ *      1. 시스템에서 사용되어지는 데이터 타입선언.
+ *      2. Vector3f : 시스템에서 가장 많이 사용되어지는 데이터 타입 
+ * @version 0.1
+ * @date 2026-05-16
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
 #pragma once
 
 #include <cstdint>

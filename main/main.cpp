@@ -15,7 +15,7 @@ extern "C"  void app_main(void)
 {
     ESP_LOGI(TAG, "=== 드론 하드웨어 HAL 테스트 시작 ===");
 
-    Utils::SharedDataManager droneState;
+    Utils::SharedDataManager sharedData;
     
 
 
@@ -26,8 +26,8 @@ extern "C"  void app_main(void)
     Sensor::ICM20948 icm20948;
 
     // 3. 중간 인터페이스 계층(BIF)을 팩토리 함수로 생성하여 센서에 주입
-    // SPI2 호스트 사용, CS 핀 번호 2번 가정
-    Interface::IBus* bus_interface = Interface::createBIF(Driver::SPI::get_instance().get_host(), 2);
+    // SPI2 호스트 사용, CS 핀 번호 10번 가정
+    Interface::IBus* bus_interface = Interface::createBIF(Driver::SPI::get_instance().get_host(), 10);
     
     if (bus_interface == nullptr) {
         ESP_LOGE(TAG, "인터페이스 생성 실패! 하드웨어 등록 에러.");
@@ -50,16 +50,25 @@ extern "C"  void app_main(void)
     //int test_count = 0;
 
 
-    Sensor::VirtualIMU vimu;
-    vimu.initialize();
+    // Sensor::VirtualIMU vimu;
+    // vimu.initialize();
 
 
     while(true){
         ImuData data{};
-        vimu.updateSample(data);
-        ESP_LOGI("MAIN","AX: %10.5f AY: %10.5f AZ: %10.5f",data.acc.x,data.acc.y,data.acc.z);
+        // vimu.updateSample(data);
+        icm20948.updateSample(data);
 
-        //droneState.setImuData(data);
+        ESP_LOGI(TAG,"| AX: %8.4f | AY: %8.4f | AZ: %8.4f | GX: %8.4f | GY: %8.4f | GZ: %8.4f|",
+                data.acc.x,
+                data.acc.y,
+                data.acc.z,
+                data.gyro.x,
+                data.gyro.y,
+                data.gyro.z
+            );
+
+        //sharedData.update_latest_imu(data);
 
         vTaskDelay( pdMS_TO_TICKS(100));
     }
