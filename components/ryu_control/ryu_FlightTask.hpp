@@ -18,14 +18,16 @@
 namespace Control{
 
 class Flight{
+    private:
+        static constexpr const char* TAG = "Flight";
     public:
+        Flight()=default;
+        ~Flight() = default;
         esp_err_t initialize();
         esp_err_t deinitialize();
-        void flight_task();
+        static void flight_task(void* pvParameters);
         void start_task();
     private:
-
-
         bool _initialized = false;
 };
 

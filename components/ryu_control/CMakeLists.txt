@@ -5,6 +5,11 @@ idf_component_register(
     INCLUDE_DIRS 
         "."
     REQUIRES 
-      freertos
+        esp_timer
+        freertos
+        ryu_system
+        ryu_sensor
+        ryu_driver
+        ryu_util
     
 )

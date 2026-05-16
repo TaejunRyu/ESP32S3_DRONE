@@ -6,7 +6,5 @@ idf_component_register(
 
     REQUIRES 
         ryu_control
-        ryu_sensor
-        ryu_driver
-        ryu_service
+
 )

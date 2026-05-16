@@ -91,20 +91,40 @@ esp_err_t ICM20948::read_data(ImuData &raw){
     
     esp_err_t err;
     select_bank(0);
-    uint8_t d[22]; 
-
+    
     if (_ibus->get_type() == Interface::BusType::I2C) {
         // I2C 모드: 기본 12바이트 리딩 및 플래그 비활성화
+        uint8_t d[12]{0,};
         err = _ibus->Read(B0_ACCEL_XOUT_H, d, 12);
         if (err != ESP_OK) return err;
+
+        raw.acc.x = (int16_t)((d[0] << 8) | d[1]) * ACCEL_SCALE;
+        raw.acc.y = (int16_t)((d[2] << 8) | d[3]) * ACCEL_SCALE;
+        raw.acc.z = (int16_t)((d[4] << 8) | d[5]) * ACCEL_SCALE;
+
+        raw.gyro.x = (int16_t)((d[6] << 8) | d[7])  * GYRO_SCALE;
+        raw.gyro.y = (int16_t)((d[8] << 8) | d[9])  * GYRO_SCALE;
+        raw.gyro.z = (int16_t)((d[10] << 8) | d[11])* GYRO_SCALE;
+        
         raw.timestamp = esp_timer_get_time();
         raw.is_mag_updated = false; // I2C 바이패스/마스터 설정을 별도로 부팅 시 완료하지 않았다면 무시
-
-    } else {
+    } 
+    else {
         // SPI 모드: 가속도6 + 자이로6 + 온도2 + 지자계데이터 패킷 연속 리딩 영역
         // AK09916의 ST1(Status1) 레지스터가 매핑된 버퍼 위치를 d[14]라고 가정 (하드웨어 매핑 스펙 기준)
+        uint8_t d[22]{0,}; 
         err = _ibus->Read(B0_ACCEL_XOUT_H, d, 22);
         if (err != ESP_OK) return err;
+
+        // 가속도 및 자이로 물리 변환
+        raw.acc.x = (int16_t)((d[0] << 8) | d[1]) * ACCEL_SCALE;
+        raw.acc.y = (int16_t)((d[2] << 8) | d[3]) * ACCEL_SCALE;
+        raw.acc.z = (int16_t)((d[4] << 8) | d[5]) * ACCEL_SCALE;
+        raw.gyro.x = (int16_t)((d[6] << 8) | d[7]) * GYRO_SCALE;
+        raw.gyro.y = (int16_t)((d[8] << 8) | d[9]) * GYRO_SCALE;
+        raw.gyro.z = (int16_t)((d[10] << 8) | d[11]) * GYRO_SCALE;
+        raw.timestamp = esp_timer_get_time();
+
         // ★ [핵심 방어] 지자계 Data Ready(DRDY) 비트 검사
         uint8_t st1 = d[14]; // AK09916 ST1 레지스터 위치
         if (st1 & 0x01) {    // DRDY 비트가 1인 경우 = '하드웨어적으로 진짜 새 지자계가 확보됨'
@@ -112,71 +132,14 @@ esp_err_t ICM20948::read_data(ImuData &raw){
             raw.mag_timestamp = raw.timestamp;
 
             // 지자계 Little-Endian 패킷 파싱 (d[15]부터 마그네토미터 데이터 시작 가정)
-            raw.mag.x = (int16_t)((d[16] << 8) | d[15]) * MAG_SCALE; 
-            raw.mag.y = (int16_t)((d[18] << 8) | d[17]) * MAG_SCALE;
-            raw.mag.z = (int16_t)((d[20] << 8) | d[19]) * MAG_SCALE;
+            raw.mag.x = (int16_t)((d[16] << 8) | d[15]) * 0.15f; 
+            raw.mag.y = (int16_t)((d[18] << 8) | d[17]) * 0.15f;
+            raw.mag.z = (int16_t)((d[20] << 8) | d[19]) * 0.15f;
         } else {
             // 이번 고속 루프 주기에 새 지자계가 없으면 갱신 패스 알림
             raw.is_mag_updated = false;
         }
     }
-
-    raw.acc.x = (int16_t)((d[0] << 8) | d[1]) * ACCEL_SCALE;
-    raw.acc.y = (int16_t)((d[2] << 8) | d[3]) * ACCEL_SCALE;
-    raw.acc.z = (int16_t)((d[4] << 8) | d[5]) * ACCEL_SCALE;
-
-    raw.gyro.x = (int16_t)((d[6] << 8) | d[7])   * GYRO_SCALE;
-    raw.gyro.y = (int16_t)((d[8] << 8) | d[9])   * GYRO_SCALE;
-    raw.gyro.z = (int16_t)((d[10] << 8) | d[11]) * GYRO_SCALE;
-    
-    // if (_ibus->get_type() == Interface::BusType::I2C) {
-    //     // I2C 모드: 기본 12바이트 리딩 및 플래그 비활성화
-    //     uint8_t d[12];
-    //     err = _ibus->Read(B0_ACCEL_XOUT_H, d, 12);
-    //     if (err != ESP_OK) return err;
-
-    //     raw.acc.x = (int16_t)((d[0] << 8) | d[1]) * ACCEL_SCALE;
-    //     raw.acc.y = (int16_t)((d[2] << 8) | d[3]) * ACCEL_SCALE;
-    //     raw.acc.z = (int16_t)((d[4] << 8) | d[5]) * ACCEL_SCALE;
-
-    //     raw.gyro.x = (int16_t)((d[6] << 8) | d[7])  * GYRO_SCALE;
-    //     raw.gyro.y = (int16_t)((d[8] << 8) | d[9])  * GYRO_SCALE;
-    //     raw.gyro.z = (int16_t)((d[10] << 8) | d[11])* GYRO_SCALE;
-        
-    //     raw.timestamp = esp_timer_get_time();
-    //     raw.is_mag_updated = false; // I2C 바이패스/마스터 설정을 별도로 부팅 시 완료하지 않았다면 무시
-    // } 
-    // else {
-    //     // SPI 모드: 가속도6 + 자이로6 + 온도2 + 지자계데이터 패킷 연속 리딩 영역
-    //     // AK09916의 ST1(Status1) 레지스터가 매핑된 버퍼 위치를 d[14]라고 가정 (하드웨어 매핑 스펙 기준)
-    //     uint8_t d[22]; 
-    //     err = _ibus->Read(B0_ACCEL_XOUT_H, d, 22);
-    //     if (err != ESP_OK) return err;
-
-    //     // 가속도 및 자이로 물리 변환
-    //     raw.acc.x = (int16_t)((d[0] << 8) | d[1]) * ACCEL_SCALE;
-    //     raw.acc.y = (int16_t)((d[2] << 8) | d[3]) * ACCEL_SCALE;
-    //     raw.acc.z = (int16_t)((d[4] << 8) | d[5]) * ACCEL_SCALE;
-    //     raw.gyro.x = (int16_t)((d[6] << 8) | d[7]) * GYRO_SCALE;
-    //     raw.gyro.y = (int16_t)((d[8] << 8) | d[9]) * GYRO_SCALE;
-    //     raw.gyro.z = (int16_t)((d[10] << 8) | d[11]) * GYRO_SCALE;
-    //     raw.timestamp = esp_timer_get_time();
-
-    //     // ★ [핵심 방어] 지자계 Data Ready(DRDY) 비트 검사
-    //     uint8_t st1 = d[14]; // AK09916 ST1 레지스터 위치
-    //     if (st1 & 0x01) {    // DRDY 비트가 1인 경우 = '하드웨어적으로 진짜 새 지자계가 확보됨'
-    //         raw.is_mag_updated = true;
-    //         raw.mag_timestamp = raw.timestamp;
-
-    //         // 지자계 Little-Endian 패킷 파싱 (d[15]부터 마그네토미터 데이터 시작 가정)
-    //         raw.mag.x = (int16_t)((d[16] << 8) | d[15]) * 0.15f; 
-    //         raw.mag.y = (int16_t)((d[18] << 8) | d[17]) * 0.15f;
-    //         raw.mag.z = (int16_t)((d[20] << 8) | d[19]) * 0.15f;
-    //     } else {
-    //         // 이번 고속 루프 주기에 새 지자계가 없으면 갱신 패스 알림
-    //         raw.is_mag_updated = false;
-    //     }
-    // }
     return err;
 }
 
@@ -211,7 +174,7 @@ esp_err_t ICM20948::updateSample(ImuData &sample){
     // 1. 하드웨어 버스 연결 상태 방어적 체크
     if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        
     
-    ImuData data = {}; // 임시 버퍼 초기화
+    ImuData data {}; // 임시 버퍼 초기화
     esp_err_t err = read_data(data); // 칩 레지스터 일괄 리딩 (내부에서 mag 데이터 및 플래그 갱신됨)
     
     // 2. 통신이 완벽하게 성공한 경우에만 상위 객체로 데이터 복사

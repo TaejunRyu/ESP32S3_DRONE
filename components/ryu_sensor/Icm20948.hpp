@@ -15,7 +15,6 @@ namespace Sensor{
 class ICM20948 : public Interface::IImuSensor{
     private:
         static constexpr const char* TAG = "ICM20948";
-
     public:
         ~ICM20948();
         static inline constexpr uint8_t ADDR_VCC = 0x69;
