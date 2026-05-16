@@ -6,7 +6,6 @@
 #include "esp_timer.h"
 #include "DroneTypes.hpp"
 #include "Icm20948.hpp"
-#include "ImuCalibrator.hpp"
 #include "SharedDataManager.hpp"
 
 static const char* TAG = "SENSOR_TASK";
@@ -34,7 +33,7 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
         
         // 센서 하드웨어 리딩
         if (task->_icm20948->updateSample(raw_data) == ESP_OK) {
-            task->_calibrator->accumulate_bias(raw_data, ++cal_sample_count);
+            task->_icm20948->calibration_loop(raw_data, ++cal_sample_count);
         }
         
         // 정확히 1ms 쉬고 다음 샘플 수집
@@ -55,7 +54,7 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
             communication_fail_count = 0; // 에러 카운터 리셋
 
             // [단계 B] 방어 레이어 가동: 고주파 진동 노이즈 깎기 & 0점 오차 제거 (1차 LPF)
-            task->_calibrator->apply_filter(imu_data);
+            task->_icm20948->apply_filter(imu_data);
 
             // [단계 C] 허브 매니저 주입: 새로 분리된 독립 뮤텍스를 통해 Core 1(제어단)에 안전 토스
             task->_data_manager->update_latest_imu(imu_data);

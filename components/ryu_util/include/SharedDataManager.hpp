@@ -10,7 +10,7 @@ private:
     ImuData     _shared_imu_data;
     Attitude    _currentAttitude;
     Attitude    _targetAttitude; 
-    BaroData _shared_baro_data;
+    BaroData    _shared_baro_data;
     
     // ★ 안전성 핵심: 뮤텍스를 3개로 분리하여 태스크 간 병목을 완벽히 격리합니다.
     SemaphoreHandle_t _mutex_imu;

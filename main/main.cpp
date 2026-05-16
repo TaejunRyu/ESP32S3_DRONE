@@ -59,11 +59,7 @@ extern "C"  void app_main(void)
         vimu.updateSample(data);
         ESP_LOGI("MAIN","AX: %10.5f AY: %10.5f AZ: %10.5f",data.acc.x,data.acc.y,data.acc.z);
 
-        
-        
-        
         //droneState.setImuData(data);
-    
 
         vTaskDelay( pdMS_TO_TICKS(100));
     }

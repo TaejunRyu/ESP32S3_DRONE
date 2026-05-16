@@ -9,26 +9,15 @@ namespace Utils{
     class ImuCalibrator;
 }
 
-
 namespace Service{
 
 class SensorTask{
     private:
-
-
-
-    public:
         Utils::SharedDataManager *_data_manager;
         Sensor::ICM20948         *_icm20948;
-        Utils::ImuCalibrator     *_calibrator;
-
-
+    public:
         static void ReadSensorTask(void* pvParameters);
         void StartTask();
-
-
 };
 
-
-
-}
+}//namespace Service

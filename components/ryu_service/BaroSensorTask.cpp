@@ -6,7 +6,6 @@
 #include "esp_timer.h"
 #include "DroneTypes.hpp"
 #include "Icm20948.hpp"
-#include "ImuCalibrator.hpp"
 #include "SharedDataManager.hpp"
 
 static const char* TAG = "SENSOR_TASK";

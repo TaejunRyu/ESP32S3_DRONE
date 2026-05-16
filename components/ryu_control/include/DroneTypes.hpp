@@ -59,7 +59,6 @@ struct Vector3f {
         }
         return *this;
     }
-
 };
 
 // 2. 오일러 각도 기반 드론 자세 데이터
