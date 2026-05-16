@@ -11,7 +11,7 @@
 #include "ryu_DroneConfig.hpp"
 #include "ryu_BusInterface.hpp"
 #include "ryu_SharedDataManager.hpp"
-
+#include "ryu_FrameTransformer.hpp"
 namespace Control{
 
 esp_err_t Flight::initialize()
@@ -72,10 +72,11 @@ void Flight::flight_task(void *pvParameters)
         _icm20948.updateSample(data);
         _icm20948.calibration_loop(data,++sample_count); // 자동으로 (처음 500회는 적용되지 않은 데이터가 나오다가 500부터 적용됨.
         //_icm20948.apply_filter(data); // lpf 필터적용.
-        _icm20948.change_NED(data);
+        _icm20948.align_NED(data);
 
         data.mag.norm();
-
+        Utils::FrameTransformer::convert_to(data,Utils::CoordSystem::ENU);
+        
         if(loop_cnt % 16 == 0){
             ESP_LOGI(TAG,"| AX: %9.4f | AY: %9.4f | AZ: %9.4f | GX: %9.4f | GY: %9.4f | GZ: %9.4f| MX: %9.4f | MY: %9.4f | MZ: %9.4f|",
                     data.acc.x,

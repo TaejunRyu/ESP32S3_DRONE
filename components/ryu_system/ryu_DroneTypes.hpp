@@ -24,6 +24,11 @@ struct Vector3f {
             float z ;
         };
     };
+     // ★ [해결책] 이 코드를 클래스/구조체 내부에 추가해 줍니다.
+    constexpr Vector3f(const Vector3f&) = default; 
+    // 만약 이동 생성자 경고까지 대비하려면 아래 줄도 함께 넣어주면 안전합니다.
+    //constexpr Vector3f& operator=(const Vector3f&) = default;
+
     Vector3f() = default;
     Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
 

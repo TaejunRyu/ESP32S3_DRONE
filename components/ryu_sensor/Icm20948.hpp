@@ -35,7 +35,7 @@ class ICM20948 : public Interface::IImuSensor{
         esp_err_t   do_calibration();
         // filter 처리용.
         void apply_filter(ImuData& io_data);
-        void change_ENU(ImuData& data){
+        void align_ENU(ImuData& data){
             // 이건 다시 ENU로 할것인가 아니면 NED로 할것인가 선택문제.
             data.acc.y  *= -1.0f;  
             data.gyro.x *= -1.0f;
@@ -45,7 +45,7 @@ class ICM20948 : public Interface::IImuSensor{
             //data.mag.x *=  -1.0f;
             //data.mag.y *=  -1.0f;
         }
-        void change_NED(ImuData& data){
+        void align_NED(ImuData& data){
             data.acc.y  *= -1.0f;  
             data.gyro.x *= -1.0f;
             data.gyro.z *= -1.0f;
