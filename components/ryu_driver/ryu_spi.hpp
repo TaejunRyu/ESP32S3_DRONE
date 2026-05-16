@@ -30,6 +30,8 @@ public:
 
     /**
      * @brief SPI 버스 초기화
+     * 
+     
      */
     esp_err_t initialize();
 

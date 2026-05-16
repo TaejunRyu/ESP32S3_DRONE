@@ -35,7 +35,7 @@ void Flight::flight_task(void *pvParameters)
 
     Sensor::ICM20948 _icm20948;
     
-    Interface::IBus* bus_interface = Interface::createBIF(Driver::SPI::get_instance().get_host(), 10);
+    Interface::IBus* bus_interface = Interface::createBIF(Driver::SPI::get_instance().get_host(), 9);
 
     if (bus_interface == nullptr) {
         ESP_LOGE(TAG, "인터페이스 생성 실패! 하드웨어 등록 에러.");
@@ -50,26 +50,43 @@ void Flight::flight_task(void *pvParameters)
         ESP_LOGE(TAG, "ICM20948 초기화 실패! 하드웨어 핀이나 주소를 확인하세요.");
     }
 
+    _icm20948.enable_mag_bypass();
+
+
     //Watch Dog 등록.  
     esp_task_wdt_add(nullptr);
 
     uint32_t loop_cnt = 0;
     int64_t  last_time = esp_timer_get_time();
+    uint16_t sample_count =0;
+    static ImuData data{};
+    data.acc =0.0f;
+    data.gyro =0.0f;
+    data.mag =0.0f;
+
     while(true){
         if (++loop_cnt >= 400) loop_cnt = 0; // 1초 주기로 초기화
          esp_task_wdt_reset(); 
-        ImuData data{};
-        // vimu.updateSample(data);
-        _icm20948.updateSample(data);
 
-        if(loop_cnt % 64 == 0){
-            ESP_LOGI(TAG,"| AX: %8.4f | AY: %8.4f | AZ: %8.4f | GX: %8.4f | GY: %8.4f | GZ: %8.4f|",
+        
+        _icm20948.updateSample(data);
+        _icm20948.calibration_loop(data,++sample_count); // 자동으로 (처음 500회는 적용되지 않은 데이터가 나오다가 500부터 적용됨.
+        //_icm20948.apply_filter(data); // lpf 필터적용.
+        _icm20948.change_NED(data);
+
+        data.mag.norm();
+
+        if(loop_cnt % 16 == 0){
+            ESP_LOGI(TAG,"| AX: %9.4f | AY: %9.4f | AZ: %9.4f | GX: %9.4f | GY: %9.4f | GZ: %9.4f| MX: %9.4f | MY: %9.4f | MZ: %9.4f|",
                     data.acc.x,
                     data.acc.y,
                     data.acc.z,
                     data.gyro.x,
                     data.gyro.y,
-                    data.gyro.z
+                    data.gyro.z,
+                    data.mag.x,
+                    data.mag.y,
+                    data.mag.z
                 );
         }
 

@@ -64,8 +64,8 @@ struct Vector3f {
     float operator[](int index) const { return data[index]; }
     float& operator[](int index) { return data[index]; }
 
-    Vector3f& norm(const Vector3f& other ){
-        float norm = sqrtf(other.x * other.x + other.y * other.y + other.z * other.z);
+    Vector3f& norm(){
+        float norm = sqrtf( x * x + y * y + z * z);
         if (norm > 0.0f) {
             *this = *this /norm;
         }

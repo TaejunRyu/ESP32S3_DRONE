@@ -28,6 +28,7 @@ class ICM20948 : public Interface::IImuSensor{
         // 상태 관리
         esp_err_t   initialize() override;
         esp_err_t   deinitialize()  override;
+        esp_err_t   enable_mag_bypass();
         bool        is_initialized() { return _initialized; }
         esp_err_t   updateSample(ImuData& sample) override;
         esp_err_t   calibration_loop(const ImuData &data, int sample_count);
@@ -36,23 +37,22 @@ class ICM20948 : public Interface::IImuSensor{
         void apply_filter(ImuData& io_data);
         void change_ENU(ImuData& data){
             // 이건 다시 ENU로 할것인가 아니면 NED로 할것인가 선택문제.
-            data.acc.y *= -1.0f;  
+            data.acc.y  *= -1.0f;  
             data.gyro.x *= -1.0f;
-            data.gyro.z *= -1.0f; // gz: 오른쪽회전시 (+)로 증가
+            data.acc.z  *= -1.0f; // gz: 오른쪽회전시 (+)로 증가
 
             // 이건 다시 ENU로 할것인가 아니면 NED로 할것인가 선택문제.
-            data.mag.x *=  -1.0f;
-            data.mag.y *=  -1.0f;
+            //data.mag.x *=  -1.0f;
+            //data.mag.y *=  -1.0f;
         }
         void change_NED(ImuData& data){
-            // 이건 다시 ENU로 할것인가 아니면 NED로 할것인가 선택문제.
-            data.acc.y *= -1.0f;  
+            data.acc.y  *= -1.0f;  
             data.gyro.x *= -1.0f;
-            data.gyro.z *= -1.0f; // gz: 오른쪽회전시 (+)로 증가
+            data.gyro.z *= -1.0f;
+            data.acc.z  *= -1.0f; // gz: 오른쪽회전시 (+)로 증가
 
-            // 이건 다시 ENU로 할것인가 아니면 NED로 할것인가 선택문제.
-            data.mag.x *=  -1.0f;
-            data.mag.y *=  -1.0f;
+            data.mag.x *= -1.0f;
+            data.mag.y *= -1.0f;
         }
     private:
         
@@ -68,10 +68,15 @@ class ICM20948 : public Interface::IImuSensor{
         static inline constexpr uint8_t B2_ACCEL_CONFIG = 0x14;
 
         // SPI BYPASS기능을위해... 기존 레지스터 정의 아래에 추가 ...
-        static inline constexpr uint8_t B3_I2C_MST_CTRL = 0x01;
-        static inline constexpr uint8_t B3_I2C_SLV0_ADDR = 0x03;
-        static inline constexpr uint8_t B3_I2C_SLV0_REG = 0x04;
-        static inline constexpr uint8_t B3_I2C_SLV0_CTRL = 0x05;
+        // USER BANK 3 주요 레지스터 맵 정의
+        static inline constexpr uint8_t B3_I2C_SLV0_ADDR    =   0x03;
+        static inline constexpr uint8_t B3_I2C_SLV0_REG     =   0x04;
+        static inline constexpr uint8_t B3_I2C_SLV0_CTRL    =   0x05;
+        static inline constexpr uint8_t B3_I2C_SLV4_ADDR    =   0x13; // SLV4 주소
+        static inline constexpr uint8_t B3_I2C_SLV4_REG     =   0x14;
+        static inline constexpr uint8_t B3_I2C_SLV4_CTRL    =   0x15;
+        static inline constexpr uint8_t B3_I2C_SLV4_DO      =   0x16;
+        static inline constexpr uint8_t B3_I2C_MST_CTRL     =   0x01;
         static inline constexpr uint8_t B0_EXT_SLV_SENS_DATA_00 = 0x3B; // SPI 모드에서 지자계 데이터가 들어오는 시작점
 
         // AK09916
@@ -91,7 +96,6 @@ class ICM20948 : public Interface::IImuSensor{
         // MAG 원시데이터 (LSB) 에 0.15를 곱해줘야 마이크로테슬라가 된다.
         static inline constexpr float MAG_SCALE      =  0.15f;     
 
-        esp_err_t enable_mag_bypass();
         esp_err_t select_bank(uint8_t bank);
         esp_err_t read_data(ImuData& raw);
 
@@ -106,6 +110,10 @@ class ICM20948 : public Interface::IImuSensor{
         // calibration으로 값이 설정되어짐.
         Vector3f _acc_bias  {0.0f,0.0f,0.0f};
         Vector3f _gyro_bias {0.0f,0.0f,0.0f};
+
+        // 이전 측정값
+        Vector3f _mag_previous {0.0f,0.0f,0.0f};
+        uint64_t _mag_previous_time =0;
 
         bool _calibration = false;
         bool _initialized = false;

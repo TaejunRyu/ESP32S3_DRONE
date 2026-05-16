@@ -88,6 +88,7 @@ inline IBus* createBIF(spi_host_device_t host, int cs_io) {
     spi_device_handle_t dev_h;
     spi_device_interface_config_t dev_cfg = {}; // 0으로 전체 초기화
     dev_cfg.mode = 3;
+    dev_cfg.address_bits = 8;
     dev_cfg.clock_speed_hz = 7 * 1000 * 1000;
     dev_cfg.spics_io_num = cs_io;
     dev_cfg.queue_size = 7;
