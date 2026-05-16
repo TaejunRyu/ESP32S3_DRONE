@@ -5,7 +5,7 @@
 #include "BusInterface.hpp"
 #include "Icm20948.hpp"
 #include "VirtualSendor.hpp"
-#include "spi.hpp"
+#include "ryu_spi.hpp"
 #include "DroneState.hpp"
 
 static const char* TAG = "MAIN_TEST";
