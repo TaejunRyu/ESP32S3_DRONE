@@ -5,8 +5,8 @@ idf_component_register(
     INCLUDE_DIRS "."
 
     REQUIRES 
-        r_control
-        r_sensor
-        r_driver
-        r_service
+        control
+        sensor
+        driver
+        service
 )

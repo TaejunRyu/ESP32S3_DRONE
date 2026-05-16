@@ -6,11 +6,10 @@ idf_component_register(
         "include"  
 
     REQUIRES
-        esp_timer 
-        esp_driver_gpio
-        esp_driver_spi
-        esp_driver_i2c
-        r_control
+        esp_timer
+        freertos
+        sensor
+        util
     
     
 )
