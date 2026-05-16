@@ -17,4 +17,4 @@ add_compile_options(
 )
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
-project(GroundStation)
+project(ESP32S3_DRONE)

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-
+#include <cmath>
 // 1. 센서 3축 데이터 (가속도, 자이로 공용)
 struct Vector3f {
     union {
@@ -25,6 +25,15 @@ struct Vector3f {
     Vector3f operator*(float scalar) const {
         return Vector3f(x * scalar, y * scalar, z * scalar);
     }
+    Vector3f operator*(const Vector3f& other) const {
+        return Vector3f(x * other.x, y * other.y, z * other.z);
+    }
+    Vector3f operator/(int scalar) const {
+        return Vector3f(x / scalar, y / scalar, z / scalar);
+    }
+    Vector3f operator/(float scalar) const {
+        return Vector3f(x / scalar, y / scalar, z / scalar);
+    }
    // 4. 안전한 대입 연산자 (자기 대입 방어 코드 포함)
     Vector3f& operator=(const Vector3f& other) {
         if (this != &other) { 
@@ -42,6 +51,14 @@ struct Vector3f {
      // [덤] 배열처럼 인덱스로 접근하고 싶을 때를 위한 연산자 추가 (예: vec[0] -> x축)
     float operator[](int index) const { return data[index]; }
     float& operator[](int index) { return data[index]; }
+
+    Vector3f& norm(const Vector3f& other ){
+        float norm = sqrtf(other.x * other.x + other.y * other.y + other.z * other.z);
+        if (norm > 0.0f) {
+            *this = *this /norm;
+        }
+        return *this;
+    }
 
 };
 

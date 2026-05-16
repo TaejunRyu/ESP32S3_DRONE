@@ -6,7 +6,7 @@
 #include "Icm20948.hpp"
 #include "VirtualSendor.hpp"
 #include "ryu_spi.hpp"
-#include "DroneState.hpp"
+#include "SharedDataManager.hpp"
 
 static const char* TAG = "MAIN_TEST";
 
@@ -15,7 +15,7 @@ extern "C"  void app_main(void)
 {
     ESP_LOGI(TAG, "=== 드론 하드웨어 HAL 테스트 시작 ===");
 
-    DroneState droneState;
+    Utils::SharedDataManager droneState;
     
 
 
