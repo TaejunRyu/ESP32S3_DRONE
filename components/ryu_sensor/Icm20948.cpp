@@ -5,6 +5,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_timer.h>
+#include <esp_task_wdt.h>
 #include "ryu_BusInterface.hpp"
 #include "ryu_DroneConfig.hpp"
 
@@ -53,7 +54,7 @@ esp_err_t ICM20948::enable_mag_bypass()
         ESP_LOGI(TAG, "I2C Bypass Mode Enabled");
     } 
     else if (_ibus->get_type() == Interface::BusType::SPI) {
-              ESP_LOGI(TAG, "Starting SPI Sensor Hub Initializer...");
+        ESP_LOGI(TAG, "Starting SPI Sensor Hub Initializer...");
 
         // 1. Bank 0: 기존 마스터 기능 끄고 리셋 전처리
         select_bank(0); esp_rom_delay_us(50);
@@ -150,12 +151,12 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
         if (err != ESP_OK) return err;
 
         // 1. 가속도 및 자이로 변환 (기존 코드 유지)
-        raw.acc.x = (int16_t)((d[0] << 8) | d[1]) * ACCEL_SCALE;
-        raw.acc.y = (int16_t)((d[2] << 8) | d[3]) * ACCEL_SCALE;
-        raw.acc.z = (int16_t)((d[4] << 8) | d[5]) * ACCEL_SCALE;
+        raw.acc.x = (int16_t)((d[0] << 8) | d[1])    * ACCEL_SCALE;
+        raw.acc.y = (int16_t)((d[2] << 8) | d[3])    * ACCEL_SCALE;
+        raw.acc.z = (int16_t)((d[4] << 8) | d[5])    * ACCEL_SCALE;
 
-        raw.gyro.x = (int16_t)((d[6] << 8) | d[7]) * GYRO_SCALE;
-        raw.gyro.y = (int16_t)((d[8] << 8) | d[9]) * GYRO_SCALE;
+        raw.gyro.x = (int16_t)((d[6] << 8) | d[7])   * GYRO_SCALE;
+        raw.gyro.y = (int16_t)((d[8] << 8) | d[9])   * GYRO_SCALE;
         raw.gyro.z = (int16_t)((d[10] << 8) | d[11]) * GYRO_SCALE;
         raw.timestamp = esp_timer_get_time();
 
@@ -163,10 +164,20 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
         uint8_t st1 = d[14]; // d[14]는 AK09916의 ST1 레지스터
         uint8_t st2 = d[21]; // 22바이트의 맨 마지막 데이터(d[21])는 ST2 레지스터
 
+         // ST2 레지스터의 HOFL(Magnetic sensor overflow) 비트(0x08)가 뜨거나 데이터가 비정상일 때
+        if (st2 & 0x08) {
+            // 지자계가 락업에 빠진 징후이므로 마스터 버스 엔진을 순간 리셋시킵니다.
+            select_bank(0);
+            _ibus->Write(B0_USER_CTRL, 0x02); // I2C_MST_RST
+            esp_rom_delay_us(10);
+            _ibus->Write(B0_USER_CTRL, 0x20); // I2C_MST_EN 다시 켜기
+            return ESP_FAIL;
+        }
+
         // 3. 하드웨어 상태 검증 (새로운 데이터 체크 & 오버플로우 체크)
         // - st1 & 0x01 : DRDY 비트가 1인가? (지자계가 진짜 새로 갱신되었는가)
         // - !(st2 & 0x08) : HOFL 비트가 0인가? (자성 물질 근접으로 인한 센서 포화 오버플로우가 없는가)
-        if ((st1 & 0x01) && !(st2 & 0x08)) {
+        if (st1 & 0x01) {
             raw.is_mag_updated = true;
             raw.mag_timestamp = raw.timestamp;
 
@@ -202,6 +213,84 @@ void ICM20948::apply_filter(ImuData &io_data){
     // 최종 정제 데이터 반영
     io_data.acc  = _last_filtered_accel;
     io_data.gyro = _last_filtered_gyro;
+}
+
+
+
+
+void ICM20948::calibration_mag_hard_iron()
+{
+    Vector3f max_mag{-99999.0f, -99999.0f, -99999.0f};
+    Vector3f min_mag{ 99999.0f,  99999.0f,  99999.0f}; 
+
+    ImuData imudata;
+    ESP_LOGI(TAG, "지자계 보정 시작: 드론을 모든 방향(8자)으로 돌리세요 (약 30초)...");    
+
+    uint32_t total_count = 5000; 
+    uint32_t count = 0;
+
+    while (count < total_count) {
+        esp_task_wdt_reset();
+        this->read_data(imudata);
+
+        // 데이터가 실제로 업데이트되었을 때만 처리
+        if (imudata.is_mag_updated) {
+            ++count;
+            
+            max_mag.x = std::max(imudata.mag.x, max_mag.x);
+            max_mag.y = std::max(imudata.mag.y, max_mag.y);
+            max_mag.z = std::max(imudata.mag.z, max_mag.z);
+
+            min_mag.x = std::min(imudata.mag.x, min_mag.x);
+            min_mag.y = std::min(imudata.mag.y, min_mag.y);
+            min_mag.z = std::min(imudata.mag.z, min_mag.z);
+
+            // 500번 샘플링마다 진행률 출력 (중복 출력 방지)
+            if (count % 500 == 0) {
+                ESP_LOGW(TAG, "AK09916 : 보정 진행 중... (%d%%)", (count * 100) / total_count);
+            }
+        }
+        // CPU 독점을 막고 다른 태스크에 양보하기 위한 미세 딜레이
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
+    // 최종 하드 아이언 오프셋(중심점) 계산
+    Vector3f offset_mag = (max_mag + min_mag) / 2.0f;
+   
+    // 축별 반경 계산 및 0 나누기 방어코드 추가
+    Vector3f avg_delte_mag = (max_mag - min_mag) / 2.0f;
+    if (avg_delte_mag.x < 0.001f) avg_delte_mag.x = 1.0f;
+    if (avg_delte_mag.y < 0.001f) avg_delte_mag.y = 1.0f;
+    if (avg_delte_mag.z < 0.001f) avg_delte_mag.z = 1.0f;
+
+    float avg_delta = (avg_delte_mag.x + avg_delte_mag.y + avg_delte_mag.z) / 3.0f;   
+
+    Vector3f scale_mag{};
+    scale_mag.x = avg_delta / avg_delte_mag.x;
+    scale_mag.y = avg_delta / avg_delte_mag.y;
+    scale_mag.z = avg_delta / avg_delte_mag.z;
+
+    ESP_LOGW(TAG, "AK09916 HARD IRON 보정 완료!");
+    ESP_LOGW(TAG, "--------------------------------------------------");
+    ESP_LOGW(TAG, "static inline constexpr float MAG_MAX_X      = %.4f;",   max_mag.x);
+    ESP_LOGW(TAG, "static inline constexpr float MAG_MAX_Y      = %.4f;",   max_mag.y);
+    ESP_LOGW(TAG, "static inline constexpr float MAG_MAX_Z      = %.4f;",   max_mag.z);   
+    ESP_LOGW(TAG, "static inline constexpr float MAG_MIN_X      = %.4f;",   min_mag.x);
+    ESP_LOGW(TAG, "static inline constexpr float MAG_MIN_Y      = %.4f;",   min_mag.y);
+    ESP_LOGW(TAG, "static inline constexpr float MAG_MIN_Z      = %.4f;",   min_mag.z);
+    ESP_LOGW(TAG, "static inline constexpr float MAG_SCALE_X    = %.4f;",   scale_mag.x);
+    ESP_LOGW(TAG, "static inline constexpr float MAG_SCALE_Y    = %.4f;",   scale_mag.y);
+    ESP_LOGW(TAG, "static inline constexpr float MAG_SCALE_Z    = %.4f;",   scale_mag.z);
+    ESP_LOGW(TAG, "static inline constexpr float MAG_OFFSET_X   = %.4f;",   offset_mag.x);
+    ESP_LOGW(TAG, "static inline constexpr float MAG_OFFSET_Y   = %.4f;",   offset_mag.y);
+    ESP_LOGW(TAG, "static inline constexpr float MAG_OFFSET_Z   = %.4f;",   offset_mag.z);
+    ESP_LOGW(TAG, "--------------------------------------------------");
+
+    // 보정 완료 후 사용자가 로그를 읽을 수 있도록 대기 (콘솔 확인용)
+    for (uint8_t ii = 0; ii < 10; ++ii) {
+        esp_task_wdt_reset();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
 
 /**
@@ -250,109 +339,14 @@ esp_err_t  ICM20948::calibration_loop(const ImuData& data, int sample_count){
     }
     _gyro_bias = _gyro_bias + data.gyro;
     _acc_bias = _acc_bias + Vector3f(data.acc.x, data.acc.y, data.acc.z - 1.0f); 
-    if (sample_count >= 2000) {
-        _gyro_bias  = _gyro_bias * (1.0f / 2000.0f);
-        _acc_bias   = _acc_bias  * (1.0f / 2000.0f);
+    if (sample_count >= CALIBRATION_COUNT) {
+        _gyro_bias  = _gyro_bias * (1.0f / CALIBRATION_COUNT);
+        _acc_bias   = _acc_bias  * (1.0f / CALIBRATION_COUNT);
         _calibration = true;
-        //ESP_LOGW(TAG, "교정 완료 -> Gyro Bias X: %f, Y: %f, Z: %f", _gyro_bias.x, _gyro_bias.y, _gyro_bias.z);
+        ESP_LOGW(TAG,"Bias=> _gyro_bias.x: %8.4f | _gyro_bias.y: %8.4f | _gyro_bias.z: %8.4f",_gyro_bias.x,_gyro_bias.y,_gyro_bias.z);
     }
     return ESP_OK;
 }
-
-
-// Utils::ImuCalibrator calibrator;
-
-// void flight_control_loop() {
-//     ImuData imu_data;
-//     icm20948.updateSample(imu_data); // 1단계: 순수 데이터 취득
-
-//     if (시스템_초기화_중) {
-//         calibrator.accumulate_bias(imu_data, current_sample_count++);
-//         return;
-//     }
-
-//     // [방어 레이어 가동]
-//     calibrator.apply_filter(imu_data); // 0점 오차 제거 및 고주파 진동 부드럽게 커팅 완료!
-
-//     // 2단계: 노이즈가 없는 깨끗한 데이터를 칼만 필터가 원하는 ENU 축으로 전환
-//     Utils::FrameTransformer::convert_to(imu_data, Utils::TargetCoord::ENU);
-
-//     // 3단계: 칼만 필터 연산 수행 (노이즈가 없으므로 정밀한 각도 추정 가능)
-//     // kalman.update(imu_data);
-// }
-
-
-
-esp_err_t ICM20948::do_calibration()
-{
-    esp_err_t err = ESP_OK;
-    if (_calibration){ 
-        ESP_LOGW(TAG, "Already Calibration was performed.");
-        return err;
-    }
-    // 인터페이스 연결 확인
-    if (_ibus == nullptr) {
-        ESP_LOGE(TAG, "Bus interface not set!");
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "Zeroing... Keep the aircraft level.");
-
-    Vector3f sum_acc{},sum_gyro{};
-    int valid_samples = 0;
-    const int samples = 500;
-    uint8_t buf[12];
-    
-    select_bank(0);
-
-    for (int i = 0; i < samples; i++) {
-        uint64_t start_time = esp_timer_get_time();
-        // [변경] i2c_master_transmit_receive 대신 인터페이스의 read 사용
-        if (_ibus->Read(B0_ACCEL_XOUT_H, buf, 12) == ESP_OK) [[likely]] {
-            sum_acc.x  += (int16_t)((buf[0] << 8)  | buf[1])  * ACCEL_SCALE;
-            sum_acc.y  += (int16_t)((buf[2] << 8)  | buf[3])  * ACCEL_SCALE;
-            sum_acc.z  += (int16_t)((buf[4] << 8)  | buf[5])  * ACCEL_SCALE;
-            sum_gyro.x += (int16_t)((buf[6] << 8)  | buf[7])  * GYRO_SCALE;
-            sum_gyro.y += (int16_t)((buf[8] << 8)  | buf[9])  * GYRO_SCALE;
-            sum_gyro.z += (int16_t)((buf[10] << 8) | buf[11]) * GYRO_SCALE;
-            valid_samples++;
-        }
-        // 주기 제어 (LOOP_TIME에 의해서 결정되어짐)
-        uint64_t end_time = esp_timer_get_time();
-        uint32_t elapsed = (uint32_t)(end_time - start_time);
-        if (elapsed < LOOP_TIME) {
-            esp_rom_delay_us(LOOP_TIME - elapsed);
-        }
-    }
-
-    // (이하 평균값 계산 및 오프셋 저장 로직은 기존과 동일) ...
-    if (valid_samples > 0) [[likely]] {
-        _acc_bias     = sum_acc / valid_samples;
-        _acc_bias.z  -= 1.0f;                     //중력을 뺀다. offetset이기 때문에 -1을 해준다.
-        _gyro_bias    = sum_gyro / valid_samples;
-
-        _calibration = true;
-        ESP_LOGI(TAG, "Zeroing Completed.");
-        return ESP_OK;
-    } else {
-        ESP_LOGE(TAG, "Calibration Failed (No valid samples).");
-        return ESP_FAIL;
-    }
-}
-
-// // 메인 제어 루프 예시
-// ImuData current_drone_data;
-// if (icm20948.updateSample(current_drone_data) == ESP_OK) {
-//     // 1. 필터로 노이즈와 오차 제거
-//     calibrator.apply_filter(current_drone_data); 
-
-//     // 2. 상위 연산이 원하는 좌표계(예: ENU)로 통일 변환
-//     Utils::FrameTransformer::convert_to(current_drone_data, Utils::TargetCoord::ENU);
-
-//     // 3. 지자계 갱신 플래그(is_mag_updated)를 보고 칼만 필터의 보정 연산 여부 안전하게 분기 제어!
-// }
-
-
 
 esp_err_t ICM20948::initialize()
 {
@@ -426,5 +420,9 @@ esp_err_t ICM20948::deinitialize(){
     ESP_LOGI(TAG, "Deinitialized successfully (Interface detached).");
     return ESP_OK;
 }
+
+
+
+
 
 } //namespace Sensor

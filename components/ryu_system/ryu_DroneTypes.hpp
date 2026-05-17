@@ -14,6 +14,14 @@
 
 #include <cstdint>
 #include <cmath>
+
+namespace Utils{
+    enum class CoordSystem; 
+}
+
+
+
+
 // 1. 센서 3축 데이터 (가속도, 자이로 공용)
 struct Vector3f {
     union {
@@ -110,6 +118,8 @@ struct ImuData {
     uint64_t mag_timestamp;   // 지자계 데이터가 '실제 갱신된' 시점 (us)
     Vector3f mag;
     bool is_mag_updated;      // 이번 루프에 지자계 새 데이터가 들어왔는지 여부 (플래그)
+
+    Utils::CoordSystem current_coordSystem;
 };
 
 struct BaroData {

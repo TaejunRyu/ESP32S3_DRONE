@@ -46,16 +46,23 @@ public:
      * @param target_system 상위 칼만/PID가 사용하는 좌표계 (NED 또는 ENU)
      */
     static void convert_to(ImuData& src, CoordSystem target_system) {
-          float rx = src.acc.x;  float ry = src.acc.y;  float rz = src.acc.z;
-        float gx = src.gyro.x; float gy = src.gyro.y; float gz = src.gyro.z;
+if (src.current_coordSystem == target_system) return;
 
-        if (target_system == CoordSystem::NED) {
-            src.acc  = Vector3f(rx, -ry, -rz);
-            src.gyro = Vector3f(gx, -gy, -gz);
-        } else if (target_system == CoordSystem::ENU) {
-            src.acc  = Vector3f(-ry, rx, rz);
-            src.gyro = Vector3f(-gy, gx, gz);
-        }
+    // 가속도, 자이로, 지자계 모두 동일한 축 변환 규칙을 따릅니다.
+    auto swap_and_invert = [](Vector3f& v) {
+        float old_x = v.x; float old_y = v.y; float old_z = v.z;
+        v.x = old_y;       v.y = old_x;       v.z = -old_z;
+    };
+
+    if ((src.current_coordSystem == CoordSystem::NED && target_system == CoordSystem::ENU) ||
+        (src.current_coordSystem == CoordSystem::ENU && target_system == CoordSystem::NED)) {
+        
+        swap_and_invert(src.acc);
+        swap_and_invert(src.gyro);
+        swap_and_invert(src.mag); // 지자계 데이터 구조체에 추가 필요
+
+        src.current_coordSystem = target_system;
+    }
     }
 private:
     static Vector3f transform_vector(const Vector3f& vec, SensorRotation rotation) {

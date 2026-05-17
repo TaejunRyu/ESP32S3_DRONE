@@ -12,6 +12,8 @@
 #include "ryu_BusInterface.hpp"
 #include "ryu_SharedDataManager.hpp"
 #include "ryu_FrameTransformer.hpp"
+#include "ryu_KalmanFilter.h"
+
 namespace Control{
 
 esp_err_t Flight::initialize()
@@ -35,7 +37,7 @@ void Flight::flight_task(void *pvParameters)
 
     Sensor::ICM20948 _icm20948;
     
-    Interface::IBus* bus_interface = Interface::createBIF(Driver::SPI::get_instance().get_host(), 9);
+    Interface::IBus* bus_interface = Interface::createBIF(Driver::SPI::get_instance().get_host(), 10);
 
     if (bus_interface == nullptr) {
         ESP_LOGE(TAG, "인터페이스 생성 실패! 하드웨어 등록 에러.");
@@ -64,41 +66,72 @@ void Flight::flight_task(void *pvParameters)
     data.gyro =0.0f;
     data.mag =0.0f;
 
+    //_icm20948.calibration_mag_hard_iron();
+
+
+
+    Filter::KalmanFilter& kalman =  Filter::KalmanFilter::get_instance();
+    kalman.reset();
+
+
     while(true){
-        if (++loop_cnt >= 400) loop_cnt = 0; // 1초 주기로 초기화
-         esp_task_wdt_reset(); 
+        //if (++loop_cnt >= 400) loop_cnt = 0; // 1초 주기로 초기화
+        esp_task_wdt_reset(); 
 
         
         _icm20948.updateSample(data);
-        _icm20948.calibration_loop(data,++sample_count); // 자동으로 (처음 500회는 적용되지 않은 데이터가 나오다가 500부터 적용됨.
+
+        if (!_icm20948.is_calibration()){
+            _icm20948.calibration_loop(data,++sample_count); // 자동으로 (처음 500회는 적용되지 않은 데이터가 나오다가 500부터 적용됨.
+        }
         //_icm20948.apply_filter(data); // lpf 필터적용.
         _icm20948.align_NED(data);
+        
+        // ENU로 변환.
+        //Utils::FrameTransformer::convert_to(data,Utils::CoordSystem::ENU);
 
         data.mag.norm();
-        Utils::FrameTransformer::convert_to(data,Utils::CoordSystem::ENU);
-        
-        if(loop_cnt % 16 == 0){
-            ESP_LOGI(TAG,"| AX: %9.4f | AY: %9.4f | AZ: %9.4f | GX: %9.4f | GY: %9.4f | GZ: %9.4f| MX: %9.4f | MY: %9.4f | MZ: %9.4f|",
-                    data.acc.x,
-                    data.acc.y,
-                    data.acc.z,
-                    data.gyro.x,
-                    data.gyro.y,
-                    data.gyro.z,
-                    data.mag.x,
-                    data.mag.y,
-                    data.mag.z
+        // 4. [개선] 디버그 로그 주기를 1초(1000Hz 루프 기준 1000번)에 한 번으로 크게 변경
+        // UART 병목을 물리적으로 완전히 방지합니다.
+        if (++loop_cnt >= 50) { 
+            loop_cnt = 0;
+            ESP_LOGI(TAG, "| AX: %6.3f | AY: %6.3f | AZ: %6.3f | GX: %6.3f | GY: %6.3f | GZ: %6.3f| MX: %6.3f | MY: %6.3f | MZ: %6.3f|",
+                    data.acc.x, data.acc.y, data.acc.z,
+                    data.gyro.x, data.gyro.y, data.gyro.z,
+                    data.mag.x, data.mag.y, data.mag.z
                 );
         }
-
-        vTaskDelay(pdMS_TO_TICKS(1)); 
         
+        kalman.update(data.gyro,data.acc,data.mag,dt);
+                    
+        float xx,yy,zz;                
+        kalman.get_euler(&xx,&yy,&zz);
+
+
+        // if (++loop_cnt >= 50) { 
+        //     loop_cnt = 0;
+        //     ESP_LOGI(TAG, "| roll: %6.3f | pitch: %6.3f | yaw: %6.3f |",
+        //              xx, yy, zz);
+        // }
+
+
+        // 5. [초정밀 제어 + 워치독 방어 통합 구조]
         int64_t current_time;
-        while ((current_time = esp_timer_get_time()) - last_time < LOOP_TIME) {
-            if (LOOP_TIME - (current_time - last_time) > 1200) {
-                vTaskDelay(1); 
+        // 1kHz(1000us) 루프에서 남은 시간이 200us 이상으로 여유가 있다면,
+        // 강제로 딱 1개 틱(1ms) 동안 태스크를 재워 IDLE1이 워치독을 완전히 리셋하게 만듭니다.
+        current_time = esp_timer_get_time();
+        if (LOOP_TIME - (current_time - last_time) > 200) {
+            vTaskDelay(pdMS_TO_TICKS(1)); // 1ms 동안 스케줄러 권한 완벽 이양
+        }
+
+        // 1ms 미만의 초미세 지터(Jitter)는 아래의 타이머 폴링으로 완벽하게 마감 처리합니다.
+        while (true) {
+            current_time = esp_timer_get_time();
+            if (current_time - last_time >= LOOP_TIME) {
+                break; 
             }
         }
+        last_time = current_time; 
     }
 }
 

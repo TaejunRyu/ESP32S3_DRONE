@@ -5,6 +5,7 @@
 #include <driver/gpio.h>
 
 #include "ryu_ImuInterface.hpp"
+#include "ryu_FrameTransformer.hpp"
 
 namespace Interface{
     class IBus;
@@ -32,30 +33,24 @@ class ICM20948 : public Interface::IImuSensor{
         bool        is_initialized() { return _initialized; }
         esp_err_t   updateSample(ImuData& sample) override;
         esp_err_t   calibration_loop(const ImuData &data, int sample_count);
-        esp_err_t   do_calibration();
+        bool        is_calibration(){return _calibration;};
         // filter 처리용.
         void apply_filter(ImuData& io_data);
-        void align_ENU(ImuData& data){
-            // 이건 다시 ENU로 할것인가 아니면 NED로 할것인가 선택문제.
-            data.acc.y  *= -1.0f;  
-            data.gyro.x *= -1.0f;
-            data.acc.z  *= -1.0f; // gz: 오른쪽회전시 (+)로 증가
 
-            // 이건 다시 ENU로 할것인가 아니면 NED로 할것인가 선택문제.
-            //data.mag.x *=  -1.0f;
-            //data.mag.y *=  -1.0f;
-        }
         void align_NED(ImuData& data){
+            data.current_coordSystem = Utils::CoordSystem::NED;
             data.acc.y  *= -1.0f;  
             data.gyro.x *= -1.0f;
             data.gyro.z *= -1.0f;
-            data.acc.z  *= -1.0f; // gz: 오른쪽회전시 (+)로 증가
-
-            data.mag.x *= -1.0f;
-            data.mag.y *= -1.0f;
+            data.mag.x  *= -1.0f;
         }
+
+        void calibration_mag_hard_iron();
+
     private:
-        
+        // LOOP내에서 자동으로 처음 COUNT반큼 돌면서 BIAS측정
+        static inline constexpr uint16_t CALIBRATION_COUNT = 1000;    
+
         // I2C && SPI 레지스터 및 상수 정의
         static inline constexpr uint8_t REG_BANK_SEL = 0x7F;
         static inline constexpr uint8_t B0_WHO_AM_I = 0x00;
@@ -79,17 +74,17 @@ class ICM20948 : public Interface::IImuSensor{
         static inline constexpr uint8_t B3_I2C_MST_CTRL     =   0x01;
         static inline constexpr uint8_t B0_EXT_SLV_SENS_DATA_00 = 0x3B; // SPI 모드에서 지자계 데이터가 들어오는 시작점
 
-        // AK09916
-        static inline constexpr float MAG_SCALE_X       =     0.91f;
-        static inline constexpr float MAG_SCALE_Y       =     1.07f;
-        static inline constexpr float MAG_SCALE_Z       =     1.04f;
-        static inline constexpr float MAG_OFFSET_X      =     91.5f;
-        static inline constexpr float MAG_OFFSET_Y      =    176.0f;
-        static inline constexpr float MAG_OFFSET_Z      =   -170.5f;
+
+        static inline constexpr float MAG_SCALE_X        = 1.0145;
+        static inline constexpr float MAG_SCALE_Y        = 0.9987;
+        static inline constexpr float MAG_SCALE_Z        = 0.9872;
+        static inline constexpr float MAG_OFFSET_X   = -2.6250;
+        static inline constexpr float MAG_OFFSET_Y   = 15.8250;
+        static inline constexpr float MAG_OFFSET_Z   = 30.9750;
 
         // 센서 원시 데이터(LSB)를 (g)(중력가속도 단위, 약 9.81 m/s^2)로 변환하는 스케일 팩터입니다.
         // 16bit ADC 절반 크기인 32768/8g = 4096LSB/g
-        static inline constexpr float ACCEL_SCALE    =  0.000244141; // 1.0f/4096.0f;   // -+8g Full-Scale Range
+        static inline constexpr float ACCEL_SCALE    =  0.000244141f; // 1.0f/4096.0f;   // -+8g Full-Scale Range
         //센서 원시 데이터(LSB)를 deg/s (DPS, 초당 회전 각도)로 변환하는 스케일 팩터입니다.
         // 16bit ADC 절반 크기인 32768/(1000 deg/s) = 32.768LSB/g
         static inline constexpr float GYRO_SCALE     =  0.030517578f;//1.0f/32.768f;     // -+1000도 Full-Scale Range
