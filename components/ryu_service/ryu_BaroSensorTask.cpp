@@ -5,7 +5,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "ryu_DroneTypes.hpp"
-#include "Icm20948.hpp"
+#include "ryu_ICM20948.hpp"
 #include "ryu_SharedDataManager.hpp"
 
 static const char* TAG = "SENSOR_TASK";

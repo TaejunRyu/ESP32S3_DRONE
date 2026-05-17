@@ -1,4 +1,4 @@
-#include "Icm20948.hpp"
+#include "ryu_ICM20948.hpp"
 
 #include <esp_log.h>
 #include <rom/ets_sys.h>
@@ -299,7 +299,8 @@ void ICM20948::calibration_mag_hard_iron()
  * @return true 
  * @return false 
  */
-esp_err_t ICM20948::updateSample(ImuData &sample){    
+
+esp_err_t ICM20948::updateSample(ImuData& sample){    
     // 1. 하드웨어 버스 연결 상태 방어적 체크
     if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        
     

@@ -1,4 +1,3 @@
-// components/hardware/include/ICM20948.hpp
 #pragma once
 #include <memory>
 #include <driver/spi_master.h>
@@ -17,6 +16,7 @@ class ICM20948 : public Interface::IImuSensor{
     private:
         static constexpr const char* TAG = "ICM20948";
     public:
+        ICM20948(){};
         ~ICM20948();
         static inline constexpr uint8_t ADDR_VCC = 0x69;
         static inline constexpr uint8_t ADDR_GND = 0x68;
@@ -29,9 +29,9 @@ class ICM20948 : public Interface::IImuSensor{
         // 상태 관리
         esp_err_t   initialize() override;
         esp_err_t   deinitialize()  override;
-        esp_err_t   enable_mag_bypass();
-        bool        is_initialized() { return _initialized; }
         esp_err_t   updateSample(ImuData& sample) override;
+        esp_err_t   enable_mag_bypass();
+        bool        is_initialized() { return _initialized; };
         esp_err_t   calibration_loop(const ImuData &data, int sample_count);
         bool        is_calibration(){return _calibration;};
         // filter 처리용.

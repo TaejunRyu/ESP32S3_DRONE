@@ -15,6 +15,10 @@ add_compile_options(
     -ffast-math
     -fno-finite-math-only
 )
+set(IDF_COMPONENT_VALIDATION_LEVEL "WARN_NOT_SET")
+# 💡 [핵심 추가] 내 컴포넌트들이 모여있는 폴더 경로를 빌드 시스템에 강제로 주입합니다.
+set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/components")
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 project(ESP32S3_DRONE)

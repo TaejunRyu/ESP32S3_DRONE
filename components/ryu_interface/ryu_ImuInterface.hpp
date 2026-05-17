@@ -29,13 +29,3 @@ public:
 
 }// namespace IImuSensor
 
-// // 테스트용 가짜 센서 클래스
-// class VirtualIMU : public IIMU {
-// public:
-//     bool initialize() override { return true; }
-//     bool updateSample(IMUSample& sample) override {
-//         // 실제 센서 대신 수학식(정현파)으로 흔들림 데이터를 강제로 주입
-//         sample.accel.x = sin(esp_timer_get_time() / 1000000.0f);
-//         return true;
-//     }
-// };
