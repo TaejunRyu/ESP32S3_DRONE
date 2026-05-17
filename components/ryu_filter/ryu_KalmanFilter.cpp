@@ -114,6 +114,13 @@ void KalmanFilter::update(float gx, float gy, float gz, float ax, float ay, floa
     normalize_quat();
 }
 
+void KalmanFilter::update(Vector3f &acc, Vector3f &gyro, float dt)
+{
+    predict(gyro.x, gyro.y, gyro.z, dt);
+    update_accel(acc.x, acc.y, acc.z);
+    normalize_quat();
+}
+
 void KalmanFilter::update_mag(float mx, float my, float mz) {
     float norm = sqrtf(mx*mx + my*my + mz*mz);
     if (norm < 0.1f) return;

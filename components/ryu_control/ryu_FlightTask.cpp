@@ -15,149 +15,114 @@
 #include "ryu_KalmanFilter.h"
 #include "ryu_SensorTask.hpp"
 
-namespace Control{
+namespace Control {
 
 esp_err_t Flight::initialize()
 {
-    return esp_err_t();
+    return ESP_OK;
 }
 
 esp_err_t Flight::deinitialize()
 {
-    return esp_err_t();
+    return ESP_OK;
 }
 
 void Flight::flight_task(void *pvParameters)
 {
     Flight* flight = static_cast<Flight*>(pvParameters);
 
-    // // 다른 task에서 데이터를 저장하고 또 달ㄴ 태스크에서 데이터를 읽어간다.
-    // Utils::SharedDataManager& sharedData = Utils::SharedDataManager::getinstance();
-
-    // Driver::SPI::get_instance().initialize();
-
-    // Service::SensorTask sensorTask;
-    // sensorTask.StartTask();
-
-    // Sensor::ICM20948 _icm20948;
+    // [방어 설계] 지역 변수 탈출: SensorTask 인스턴스를 힙 영역에 안전하게 동적 할당하여 수명 주기 보장
+    Service::SensorTask* sensorTask = new (std::nothrow) Service::SensorTask();
+    if (sensorTask == nullptr) {
+        ESP_LOGE(TAG, "치명적 오류: SensorTask 인스턴스 생성 실패!");
+        vTaskDelete(nullptr);
+        return;
+    }
     
-    // Interface::IBus* bus_interface = Interface::createBIF(Driver::SPI::get_instance().get_host(), 10);
+    // Core 0번 센서 수집 스레드 강제 가동
+    sensorTask->StartTask();
 
-    // if (bus_interface == nullptr) {
-    //     ESP_LOGE(TAG, "인터페이스 생성 실패! 하드웨어 등록 에러.");
-    //     return;
-    // }
+    // 공유 메모리 매니저 및 칼만 필터 싱글톤 인스턴스 획득
+    Utils::SharedDataManager& sharedData = Utils::SharedDataManager::getinstance();
+    Filter::KalmanFilter& kalman = Filter::KalmanFilter::get_instance();
+    kalman.reset();
 
-    // _icm20948.set_bus(bus_interface);
-
-    // if (_icm20948.initialize() == ESP_OK) {
-    //     ESP_LOGI(TAG, "ICM20948 센서 연결 및 초기화 성공!");
-    // } else {
-    //     ESP_LOGE(TAG, "ICM20948 초기화 실패! 하드웨어 핀이나 주소를 확인하세요.");
-    // }
-
-    // _icm20948.enable_mag_bypass();
-
-
-    // //Watch Dog 등록.  
-    // esp_task_wdt_add(nullptr);
-
-    // uint32_t loop_cnt = 0;
-    // int64_t  last_time = esp_timer_get_time();
-    // uint16_t sample_count =0;
-    // static ImuData data{};
-    // data.acc =0.0f;
-    // data.gyro =0.0f;
-    // data.mag =0.0f;
-
-    // //_icm20948.calibration_mag_hard_iron();
-
-
-
-    // Filter::KalmanFilter& kalman =  Filter::KalmanFilter::get_instance();
-    // kalman.reset();
-
-
-    Service::SensorTask sensorTask;
-    sensorTask.StartTask();
+    // 태스크 워치독(TWDT) 등록
+    esp_task_wdt_add(nullptr);
 
     uint32_t loop_cnt = 0;
-    int64_t  last_time = esp_timer_get_time();
+    int64_t last_time = esp_timer_get_time();
+    
+    ImuData current_imu_data {};
 
-    while(true){
+    ESP_LOGI(TAG, "Flight 제어 태스크가 Core 1에서 가동되었습니다.");
+
+    while (true) {
+        // 워치독 피딩 (루프 정상 구동 인증)
         esp_task_wdt_reset(); 
 
-        
-        // _icm20948.updateSample(data);
+        // [단계 A] Core 0이 채워놓은 가장 최신의 정제된 IMU 데이터를 안전하게 복사 가동 (Mutex 내장)
+        sharedData.get_latest_imu(current_imu_data); 
 
-        // if (!_icm20948.is_calibration()){
-        //     _icm20948.calibration_loop(data,++sample_count); // 자동으로 (처음 500회는 적용되지 않은 데이터가 나오다가 500부터 적용됨.
-        // }
-        // //_icm20948.apply_filter(data); // lpf 필터적용.
-        // _icm20948.align_NED(data);
-        
-        // // ENU로 변환.
-        // //Utils::FrameTransformer::convert_to(data,Utils::CoordSystem::ENU);
+        // [단계 B] 시간 변화량(dt) 초정밀 계산 (초 단위 변환)
+        int64_t current_time = esp_timer_get_time();
+        float dt = static_cast<float>(current_time - last_time) / 1000000.0f;
+        last_time = current_time;
 
-        // data.mag.norm();
-        // // 4. [개선] 디버그 로그 주기를 1초(1000Hz 루프 기준 1000번)에 한 번으로 크게 변경
-        // // UART 병목을 물리적으로 완전히 방지합니다.
-        // if (++loop_cnt >= 50) { 
-        //     loop_cnt = 0;
-        //     ESP_LOGI(TAG, "| AX: %6.3f | AY: %6.3f | AZ: %6.3f | GX: %6.3f | GY: %6.3f | GZ: %6.3f| MX: %6.3f | MY: %6.3f | MZ: %6.3f|",
-        //             data.acc.x, data.acc.y, data.acc.z,
-        //             data.gyro.x, data.gyro.y, data.gyro.z,
-        //             data.mag.x, data.mag.y, data.mag.z
-        //         );
-        // }
-        
-        // kalman.update(data.gyro,data.acc,data.mag,dt);
-                    
-        // float xx,yy,zz;                
-        // kalman.get_euler(&xx,&yy,&zz);
+        // [단계 C] 캘리브레이션이 완료된 정상 상태일 때만 칼만 필터 갱신 및 PID 연산 진입
+        // 💡 부팅 직후 1초 동안 센서가 0점 교정 중일 때는 자세 추정 연산을 안전하게 대기시킵니다.
+        if (sharedData.is_imu_calibrated()) {
+            const float DEG_TO_RAD = 0.0174532925f;
+            //current_imu_data.acc    = current_imu_data.acc  * DEG_TO_RAD;
+            Vector3f  gyro_rad  = current_imu_data.gyro * DEG_TO_RAD;
 
+            // 칼만 필터 센서 퓨전 가동 (NED 정렬 및 LPF 처리는 이미 Core 0에서 마감됨)
+            //kalman.update(gyro_rad, current_imu_data.acc, dt);
+            kalman.update(gyro_rad, current_imu_data.acc, current_imu_data.mag, dt);
+                        
+            float roll = 0.0f, pitch = 0.0f, yaw = 0.0f;         
+                   
+            kalman.get_euler(&roll, &pitch, &yaw);
 
-        // // if (++loop_cnt >= 50) { 
-        // //     loop_cnt = 0;
-        // //     ESP_LOGI(TAG, "| roll: %6.3f | pitch: %6.3f | yaw: %6.3f |",
-        // //              xx, yy, zz);
-        // // }
-
-
-        // 5. [초정밀 제어 + 워치독 방어 통합 구조]
-        int64_t current_time;
-        // 1kHz(1000us) 루프에서 남은 시간이 200us 이상으로 여유가 있다면,
-        // 강제로 딱 1개 틱(1ms) 동안 태스크를 재워 IDLE1이 워치독을 완전히 리셋하게 만듭니다.
-        current_time = esp_timer_get_time();
-        if (LOOP_TIME - (current_time - last_time) > 200) {
-            vTaskDelay(pdMS_TO_TICKS(1)); // 1ms 동안 스케줄러 권한 완벽 이양
+            //[단계 D] 과도한 UART 병목을 차단하기 위해 50ms(50Hz) 주기로만 각도 출력
+            if (++loop_cnt >= 50) { 
+                loop_cnt = 0;
+                ESP_LOGI(TAG, "[자세 상태] Roll: %6.2f | Pitch: %6.2f | Yaw: %6.2f", roll, pitch, yaw);
+            }
+            
+            // TODO: 수집된 roll, pitch, yaw 기반으로 PID_Compute() 가동 및 DShot 모터 출력 바인딩 공간
         }
 
-        // 1ms 미만의 초미세 지터(Jitter)는 아래의 타이머 폴링으로 완벽하게 마감 처리합니다.
+        // [단계 E] 초정밀 주기 제어 + 워치독 방어 구조 유지
+        int64_t wake_time = esp_timer_get_time();
+        if (LOOP_TIME - (wake_time - last_time) > 200) {
+            vTaskDelay(pdMS_TO_TICKS(1)); // IDLE 태스크에게 CPU 권한을 양보하여 워치독 리셋 보장
+        }
+
+        // 1ms 미만의 미세 지터는 하드웨어 타이머 폴링으로 정밀 마감
         while (true) {
-            current_time = esp_timer_get_time();
-            if (current_time - last_time >= LOOP_TIME) {
+            if (esp_timer_get_time() - last_time >= LOOP_TIME) {
                 break; 
             }
         }
-        last_time = current_time; 
     }
-}
 
+    // 예외 상황 발생 시 메모리 반환
+    delete sensorTask;
+    vTaskDelete(nullptr);
+}
 
 void Flight::start_task()
 {
     xTaskCreatePinnedToCore(
-        flight_task,                // 실행할 함수 포인터
-        "flight_task",              // 디버그용 태스크 명칭
-        8192,                       // 스택 크기 (안전하게 4KB 할당)
-        this,                       // 매개변수
-        configMAX_PRIORITIES - 1,      // ★ 방어 설계: 시스템 최상위 우선순위 부여 (주기 왜곡 방지)
-        nullptr,                    // 태스크 핸들러 변수 생략
-        1                           // ★ 핵심: Core 1번 칩에 고정 바인딩 
+        flight_task,                
+        "flight_task",              
+        8192, // 연산 스택 최적화 (8KB 확보 유지)
+        this,                       
+        configMAX_PRIORITIES - 1,   
+        nullptr,                    
+        1 // Core 1번에 고정 바인딩하여 센서 수집단(Core 0)과 완벽하게 물리 격리
     );
 }
-
-
 
 } // namespace Control

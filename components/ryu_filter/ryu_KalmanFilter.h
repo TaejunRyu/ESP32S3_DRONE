@@ -43,7 +43,8 @@ public:
 
     void update(Vector3f& acc,Vector3f& gyro,Vector3f& mag, float dt);
     void update(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz, float dt);
-    void update(float gx, float gy, float gz, float ax, float ay, float az, float dt);
+    void update(Vector3f& acc,Vector3f& gyro, float dt);
+    void update(float gx, float gy, float gz, float ax, float ay, float az, float dt);    
     void get_euler(float* roll, float* pitch, float* yaw);
     void get_speed_err(float* rollspeed, float* pitchspeed, float* yawspeed);
     void reset();

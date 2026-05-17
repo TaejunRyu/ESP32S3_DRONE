@@ -11,6 +11,11 @@
 
 
 namespace Sensor{
+// 생성자 구현
+ICM20948::ICM20948() {
+    // 초기화 코드...
+}
+
 
 ICM20948::~ICM20948()
 {
@@ -130,7 +135,6 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
     select_bank(0);
     
     if (_ibus->get_type() == Interface::BusType::I2C) {
-        // --- [I2C 모드: 기존 코드 유지] ---
         uint8_t d[12]{0,};
         err = _ibus->Read(B0_ACCEL_XOUT_H, d, 12);
         if (err != ESP_OK) return err;
@@ -145,12 +149,13 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
         raw.is_mag_updated = false;
     } 
     else {
-          // 22바이트 연속 리딩 (Accel 6 + Gyro 6 + Temp 2 + Mag 8)
-        uint8_t d[22];
-        err = _ibus->Read(B0_ACCEL_XOUT_H, d, 22);
+        // 24바이트 연속 리딩으로 확장 (Accel 6 + Gyro 6 + Temp 2 + Mag_Status/Data 10)
+        // 💡 기존 22바이트에서 온도 데이터 2바이트를 온전히 포함하기 위해 24바이트 구조로 확장해야 완벽하게 마감됩니다.
+        uint8_t d[24];
+        err = _ibus->Read(B0_ACCEL_XOUT_H, d, 24);
         if (err != ESP_OK) return err;
 
-        // 1. 가속도 및 자이로 변환 (기존 코드 유지)
+        // 1. 가속도 및 자이로 변환 (정상 유지)
         raw.acc.x = (int16_t)((d[0] << 8) | d[1])    * ACCEL_SCALE;
         raw.acc.y = (int16_t)((d[2] << 8) | d[3])    * ACCEL_SCALE;
         raw.acc.z = (int16_t)((d[4] << 8) | d[5])    * ACCEL_SCALE;
@@ -158,38 +163,39 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
         raw.gyro.x = (int16_t)((d[6] << 8) | d[7])   * GYRO_SCALE;
         raw.gyro.y = (int16_t)((d[8] << 8) | d[9])   * GYRO_SCALE;
         raw.gyro.z = (int16_t)((d[10] << 8) | d[11]) * GYRO_SCALE;
+        
+        // 💡 [참고] d[12], d[13] 은 내부 온도 데이터 레지스터 공간입니다.
+        raw.temperature = (int16_t)((d[12] << 8) | d[13]); 
         raw.timestamp = esp_timer_get_time();
 
-        // 2. [핵심] 지자계 상태 레지스터 추출
-        uint8_t st1 = d[14]; // d[14]는 AK09916의 ST1 레지스터
-        uint8_t st2 = d[21]; // 22바이트의 맨 마지막 데이터(d[21])는 ST2 레지스터
+        // 2. [💡 하드웨어 인덱스 정밀 교정] 지자계 상태 레지스터 주소 매핑 바로잡기
+        // 가속도(6) + 자이로(6) + 온도(2) = 총 14바이트 이후부터 지자계 데이터가 시작됩니다.
+        uint8_t st1 = d[14]; // ◀ 15번째 바이트(d[14])가 정확한 AK09916의 ST1 레지스터입니다.
+        uint8_t st2 = d[23]; // ◀ 24바이트 연속 리딩의 맨 마지막 바이트(d[23])가 진짜 ST2 레지스터입니다.
 
-         // ST2 레지스터의 HOFL(Magnetic sensor overflow) 비트(0x08)가 뜨거나 데이터가 비정상일 때
+        // ST2 레지스터의 HOFL(오버플로우) 비트 검증
         if (st2 & 0x08) {
-            // 지자계가 락업에 빠진 징후이므로 마스터 버스 엔진을 순간 리셋시킵니다.
             select_bank(0);
             _ibus->Write(B0_USER_CTRL, 0x02); // I2C_MST_RST
             esp_rom_delay_us(10);
-            _ibus->Write(B0_USER_CTRL, 0x20); // I2C_MST_EN 다시 켜기
+            _ibus->Write(B0_USER_CTRL, 0x20); // I2C_MST_EN
             return ESP_FAIL;
         }
 
-        // 3. 하드웨어 상태 검증 (새로운 데이터 체크 & 오버플로우 체크)
-        // - st1 & 0x01 : DRDY 비트가 1인가? (지자계가 진짜 새로 갱신되었는가)
-        // - !(st2 & 0x08) : HOFL 비트가 0인가? (자성 물질 근접으로 인한 센서 포화 오버플로우가 없는가)
+        // 3. 지자계 데이터 갱신 여부 및 물리 변환 처리 (인덱스 시프트 완료)
         if (st1 & 0x01) {
             raw.is_mag_updated = true;
             raw.mag_timestamp = raw.timestamp;
 
-            // 새로운 데이터가 정상 확인되었을 때만 물리 변환 수행
+            // 💡 AK09916 지자계 데이터 레지스터는 리틀 엔디안(Little-Endian) 구조입니다!
+            // 고로 LSB가 앞(d[15]), MSB가 뒤(d[16])에 오는 것이 완벽한 하드웨어 스펙 매칭입니다.
             raw.mag.x = (int16_t)((d[16] << 8) | d[15]) * MAG_SCALE; 
             raw.mag.y = (int16_t)((d[18] << 8) | d[17]) * MAG_SCALE;
             raw.mag.z = (int16_t)((d[20] << 8) | d[19]) * MAG_SCALE;
+            
             _mag_previous = raw.mag;
             _mag_previous_time = raw.timestamp;
         } else {
-            // 1. 새로운 데이터가 없는 고속 루프 구간에서는 플래그를 꺼서 외부 각도 계산 알고리즘이 누적 연산을 수행하지 않도록 방어합니다.
-            // 2. 일단 데이터가 없는경우에는 이전 값을 반환한다.
             raw.is_mag_updated = false;
             raw.mag = _mag_previous;
             raw.mag_timestamp = _mag_previous_time;
@@ -319,7 +325,6 @@ esp_err_t ICM20948::updateSample(ImuData& sample){
         sample.temperature = data.temperature;
         sample.timestamp   = data.timestamp;
 
-        // [mag 데이터 업데이발생이 안될 경우 이전값을 받아온다.]
         sample.mag    = (data.mag -_mag_offset) * _mag_scale;
         sample.mag_timestamp  = data.mag_timestamp;
         sample.is_mag_updated = data.is_mag_updated;            
