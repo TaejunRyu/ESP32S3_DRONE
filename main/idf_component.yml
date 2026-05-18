@@ -15,4 +15,5 @@ dependencies:
   #   # All dependencies of `main` are public by default.
   #   public: true
   espressif/mavlink: ^1.0.0~1
+  espressif/esp-dsp: "^1.4.0" # <-- 칼만 필터 행렬 연산 가속을 위해 이 줄을 추가합니다.
   #espressif/led_strip: ^2.5.3

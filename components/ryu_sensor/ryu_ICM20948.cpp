@@ -191,14 +191,9 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
             // 고로 LSB가 앞(d[15]), MSB가 뒤(d[16])에 오는 것이 완벽한 하드웨어 스펙 매칭입니다.
             raw.mag.x = (int16_t)((d[16] << 8) | d[15]) * MAG_SCALE; 
             raw.mag.y = (int16_t)((d[18] << 8) | d[17]) * MAG_SCALE;
-            raw.mag.z = (int16_t)((d[20] << 8) | d[19]) * MAG_SCALE;
-            
-            _mag_previous = raw.mag;
-            _mag_previous_time = raw.timestamp;
+            raw.mag.z = (int16_t)((d[20] << 8) | d[19]) * MAG_SCALE;            
         } else {
             raw.is_mag_updated = false;
-            raw.mag = _mag_previous;
-            raw.mag_timestamp = _mag_previous_time;
         }
     }
     return err;
@@ -313,21 +308,33 @@ esp_err_t ICM20948::updateSample(ImuData& sample){
     ImuData data {}; // 임시 버퍼 초기화
     data.acc = 0.0f;
     data.gyro = 0.0f;
-    data.mag = 0.0f;
+    data.mag = 0.0f; 
 
     esp_err_t err = read_data(data); // 칩 레지스터 일괄 리딩 (내부에서 mag 데이터 및 플래그 갱신됨)
     
     // 2. 통신이 완벽하게 성공한 경우에만 상위 객체로 데이터 복사
     if (err == ESP_OK){
         // [기본 IMU 데이터 전달]
-        sample.acc         = data.acc   - _acc_bias;
-        sample.gyro        = data.gyro  - _gyro_bias;
+        if(is_calibration()){
+            sample.acc         = data.acc   - _acc_bias;
+            sample.gyro        = data.gyro  - _gyro_bias;
+        }else{
+            sample.acc         = data.acc  ;
+            sample.gyro        = data.gyro ;
+        }
         sample.temperature = data.temperature;
         sample.timestamp   = data.timestamp;
 
-        sample.mag    = (data.mag -_mag_offset) * _mag_scale;
-        sample.mag_timestamp  = data.mag_timestamp;
-        sample.is_mag_updated = data.is_mag_updated;            
+        if (data.is_mag_updated){
+            sample.mag    = (data.mag -_mag_offset) * _mag_scale;
+            sample.mag_timestamp  = data.mag_timestamp;
+            sample.is_mag_updated = data.is_mag_updated;
+            _mag_previous =sample.mag;   //정상으로 읽었을때 자료 보관.
+ 
+        }else{
+            sample.mag = _mag_previous; // 읽지 못하였을경우 이전값으로....
+        }     
+       
     }
     return err;
 }
@@ -343,13 +350,18 @@ esp_err_t  ICM20948::calibration_loop(const ImuData& data, int sample_count){
     if( _calibration){
         return ESP_OK;
     }
+    _acc_bias  = _acc_bias + Vector3f(data.acc.x, data.acc.y, data.acc.z - 1.0f); 
     _gyro_bias = _gyro_bias + data.gyro;
-    _acc_bias = _acc_bias + Vector3f(data.acc.x, data.acc.y, data.acc.z - 1.0f); 
+
     if (sample_count >= CALIBRATION_COUNT) {
         _gyro_bias  = _gyro_bias * (1.0f / CALIBRATION_COUNT);
         _acc_bias   = _acc_bias  * (1.0f / CALIBRATION_COUNT);
         _calibration = true;
-        ESP_LOGW(TAG,"Bias=> _gyro_bias.x: %8.4f | _gyro_bias.y: %8.4f | _gyro_bias.z: %8.4f",_gyro_bias.x,_gyro_bias.y,_gyro_bias.z);
+        // ESP_LOGW(TAG,"Bias=> _acc_bias.x: %8.6f | _acc_bias.y: %8.6f | _acc_bias.z: %8.6f",
+        //     _acc_bias.x,_acc_bias.y,_acc_bias.z);
+
+        // ESP_LOGW(TAG,"Bias=> _gyro_bias.x: %8.6f | _gyro_bias.y: %8.6f | _gyro_bias.z: %8.6f",
+        //     _gyro_bias.x,_gyro_bias.y,_gyro_bias.z);
     }
     return ESP_OK;
 }
@@ -412,6 +424,10 @@ esp_err_t ICM20948::initialize()
     select_bank(0);
     vTaskDelay(pdMS_TO_TICKS(10));
 
+    _gyro_bias = 0.0f;
+    _acc_bias  = 0.0f;
+    _mag_previous = 0.0f;
+        
     _initialized = true;
     ESP_LOGI(TAG, "Initialized successfully via Interface.");
     return ESP_OK;

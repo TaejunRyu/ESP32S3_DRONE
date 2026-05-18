@@ -12,7 +12,7 @@
 #include "ryu_BusInterface.hpp"
 #include "ryu_SharedDataManager.hpp"
 #include "ryu_FrameTransformer.hpp"
-#include "ryu_KalmanFilter.h"
+#include "ryu_KalmanFilter.hpp"
 #include "ryu_SensorTask.hpp"
 
 namespace Control {
@@ -38,14 +38,18 @@ void Flight::flight_task(void *pvParameters)
         vTaskDelete(nullptr);
         return;
     }
-    
     // Core 0번 센서 수집 스레드 강제 가동
     sensorTask->StartTask();
 
     // 공유 메모리 매니저 및 칼만 필터 싱글톤 인스턴스 획득
     Utils::SharedDataManager& sharedData = Utils::SharedDataManager::getinstance();
-    Filter::KalmanFilter& kalman = Filter::KalmanFilter::get_instance();
-    kalman.reset();
+    Filter::KalmanFilter& kalman = Filter::KalmanFilter::getInstance();
+    // 1. 싱글톤 인스턴스 가져오기 및 초기화
+    // 파라미터 순서: Q_gyro, Q_angle, R_accel, R_mag
+    // (드론의 진동 특성에 따라 이 노이즈 파라미터들을 미세 조정합니다)
+    // 변경 (추천):
+    kalman.init(0.0005f, 0.005f, 0.4f, 1.0f);
+    //kalman.init(0.0001f, 0.001f, 0.1f, 0.5f);
 
     // 태스크 워치독(TWDT) 등록
     esp_task_wdt_add(nullptr);
@@ -63,6 +67,23 @@ void Flight::flight_task(void *pvParameters)
 
         // [단계 A] Core 0이 채워놓은 가장 최신의 정제된 IMU 데이터를 안전하게 복사 가동 (Mutex 내장)
         sharedData.get_latest_imu(current_imu_data); 
+        
+        //[단계 D] 과도한 UART 병목을 차단하기 위해 50ms(50Hz) 주기로만 각도 출력
+        // if (++loop_cnt >= 50) { 
+        //     loop_cnt = 0;
+        //     ESP_LOGI(TAG, "|AX : %8.5f |AY : %8.5f |AZ : %8.5f |GX : %8.5f |GY : %8.5f |GZ : %8.5f |MX : %8.5f |MY : %8.5f |MZ : %8.5f |", 
+        //             current_imu_data.acc.x,
+        //             current_imu_data.acc.y,
+        //             current_imu_data.acc.z,
+        //             current_imu_data.gyro.x,
+        //             current_imu_data.gyro.y,
+        //             current_imu_data.gyro.z,
+        //             current_imu_data.mag.x,
+        //             current_imu_data.mag.y,
+        //             current_imu_data.mag.z
+        //         );
+        // }
+
 
         // [단계 B] 시간 변화량(dt) 초정밀 계산 (초 단위 변환)
         int64_t current_time = esp_timer_get_time();
@@ -73,25 +94,62 @@ void Flight::flight_task(void *pvParameters)
         // 💡 부팅 직후 1초 동안 센서가 0점 교정 중일 때는 자세 추정 연산을 안전하게 대기시킵니다.
         if (sharedData.is_imu_calibrated()) {
             const float DEG_TO_RAD = 0.0174532925f;
-            //current_imu_data.acc    = current_imu_data.acc  * DEG_TO_RAD;
+             const float RAD_TO_DEG = 57.295779513f; 
             Vector3f  gyro_rad  = current_imu_data.gyro * DEG_TO_RAD;
 
-            // 칼만 필터 센서 퓨전 가동 (NED 정렬 및 LPF 처리는 이미 Core 0에서 마감됨)
-            //kalman.update(gyro_rad, current_imu_data.acc, dt);
-            kalman.update(gyro_rad, current_imu_data.acc, current_imu_data.mag, dt);
-                        
-            float roll = 0.0f, pitch = 0.0f, yaw = 0.0f;         
-                   
-            kalman.get_euler(&roll, &pitch, &yaw);
+            kalman.update(current_imu_data.acc, gyro_rad, current_imu_data.mag, dt); // 내부적으로 mag 보정 프로세스를 자동으로 거침
 
+  
+            Vector3f EulerRad = kalman.getEuler();
+            
+            Vector3f EulerDeg = {
+                EulerRad.x * RAD_TO_DEG,
+                EulerRad.y * RAD_TO_DEG,
+                EulerRad.z * RAD_TO_DEG
+            };
+
+            //[단계 D] 과도한 UART 병목을 차단하기 위해 50ms(50Hz) 주기로만 각도 출력
+            // if (++loop_cnt >= 50) { 
+            //     loop_cnt = 0;
+            //     ESP_LOGI(TAG, "[자세 상태] Roll: %6.2f | Pitch: %6.2f | Yaw: %6.2f", EulerDeg.x, EulerDeg.y, EulerDeg.z);
+            // }
             //[단계 D] 과도한 UART 병목을 차단하기 위해 50ms(50Hz) 주기로만 각도 출력
             if (++loop_cnt >= 50) { 
                 loop_cnt = 0;
-                ESP_LOGI(TAG, "[자세 상태] Roll: %6.2f | Pitch: %6.2f | Yaw: %6.2f", roll, pitch, yaw);
-            }
-            
+                ESP_LOGI(TAG, "|AX : %8.5f |AY : %8.5f |AZ : %8.5f |GX : %8.5f |GY : %8.5f |GZ : %8.5f |MX : %8.5f |MY : %8.5f |MZ : %8.5f |ROLL : %8.5f |PITCH : %8.5f |YAW : %8.5f ", 
+                        current_imu_data.acc.x,
+                        current_imu_data.acc.y,
+                        current_imu_data.acc.z,
+                        current_imu_data.gyro.x * DEG_TO_RAD,
+                        current_imu_data.gyro.y * DEG_TO_RAD,
+                        current_imu_data.gyro.z * DEG_TO_RAD,
+                        current_imu_data.mag.x,
+                        current_imu_data.mag.y,
+                        current_imu_data.mag.z,
+                        EulerDeg.x,   // 이제 원복 현상 없이 정교하게 각도가 추종됩니다.
+                        EulerDeg.y,
+                        EulerDeg.z -7.7f
+                    );
+            }            
+
+
+
+
+
+
+
+
             // TODO: 수집된 roll, pitch, yaw 기반으로 PID_Compute() 가동 및 DShot 모터 출력 바인딩 공간
         }
+
+
+
+
+
+
+
+
+
 
         // [단계 E] 초정밀 주기 제어 + 워치독 방어 구조 유지
         int64_t wake_time = esp_timer_get_time();

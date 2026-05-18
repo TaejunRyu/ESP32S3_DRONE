@@ -25,7 +25,7 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
     Driver::SPI& spi = Driver::SPI::get_instance();
     spi.initialize();
 
-    Interface::IBus* bus_interface = Interface::createBIF(spi.get_host(), 10);
+    Interface::IBus* bus_interface = Interface::createBIF(spi.get_host(), 9);
 
     // 동적 할당 및 NULL 포인터 검증 예외 처리
     task->_icm20948 = new (std::nothrow) Sensor::ICM20948();
@@ -83,13 +83,11 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
                 // 0점 교정이 끝난 실전 비행 모드 데이터 정제 작업
                 task->_icm20948->apply_filter(imu_data);
             }
-
             // 💡 [좌표 정렬 및 데이터 토스 일원화] 
             // 캘리브레이션 중이더라도 제어단(Core 1)이 굶지 않고 루프를 돌 수 있도록 데이터를 계속 던져줍니다.
-            task->_icm20948->align_NED(imu_data);
             imu_data.mag.norm();
+            task->_icm20948->align_NED(imu_data);
             task->_data_manager->update_latest_imu(imu_data);
-            // FlightTask 또는 SensorTask 루프 내부에 잠시 배치
 
             // if (++loop_cnt >= 50) { 
             //     loop_cnt = 0;
@@ -110,7 +108,6 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
                 // task->_data_manager->trigger_emergency_stop();
             }
         }
-        
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 

@@ -1,155 +1,134 @@
-#include "ryu_KalmanFilter.h"
-#include <cmath>
-#include <algorithm>
+#include "ryu_KalmanFilter.hpp"
 
 namespace Filter {
 
-KalmanFilter::KalmanFilter() {
-    reset();
+KalmanFilter::KalmanFilter()
+    : Q_angle_(0.005f), Q_gyro_(0.0005f), R_accel_(0.4f), R_mag_(1.0f) { // 반응 속도 최적화 파라미터 기본 적용
+    
+    estimated_attitude_ = {0.0f, 0.0f, 0.0f};
+    bias_ = {0.0f, 0.0f, 0.0f};
+
+    Px00 = 1.0f; Px01 = 0.0f; Px10 = 0.0f; Px11 = 1.0f;
+    Py00 = 1.0f; Py01 = 0.0f; Py10 = 0.0f; Py11 = 1.0f;
+    Pz00 = 1.0f; Pz01 = 0.0f; Pz10 = 0.0f; Pz11 = 1.0f;
 }
 
-void KalmanFilter::reset() {
-    x[0] = 1.0f; x[1] = 0.0f; x[2] = 0.0f; x[3] = 0.0f;
-    x[4] = 0.0f; x[5] = 0.0f; x[6] = 0.0f;
-    
-    for(int i=0; i<7; i++) {
-        for(int j=0; j<7; j++) P[i][j] = 0.0f;
-        P[i][i] = 0.1f;
+void KalmanFilter::init(float q_gyro, float q_angle, float r_accel, float r_mag) {
+    std::lock_guard<std::mutex> lock(mtx_);
+    Q_gyro_ = q_gyro;
+    Q_angle_ = q_angle;
+    R_accel_ = r_accel;
+    R_mag_ = r_mag;
+}
+
+Vector3f KalmanFilter::getEuler() const {
+    std::lock_guard<std::mutex> lock(mtx_);
+    return estimated_attitude_;
+}
+
+void KalmanFilter::normalizeVector(Vector3f& v) {
+    float norm = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (norm > 0.001f) {
+        v.x /= norm; v.y /= norm; v.z /= norm;
+    } else {
+        v.x = 0.0f; v.y = 0.0f; v.z = 1.0f;
     }
 }
 
-void KalmanFilter::update(float gx, float gy, float gz, float ax, float ay, float az, float dt) {
-    predict(gx, gy, gz, dt);
-    update_accel(ax, ay, az);
-    normalize_quat();
-}
+void KalmanFilter::update(const Vector3f& acc, const Vector3f& gyro_rad, const Vector3f& mag, float dt) {
+    std::lock_guard<std::mutex> lock(mtx_);
 
-void KalmanFilter::predict(float gx, float gy, float gz, float dt) {
-    // 1. 자이로 바이어스 제거
-    float wx = gx - x[4];
-    float wy = gy - x[5];
-    float wz = gz - x[6];
+    if (dt <= 0.0f || dt > 0.1f) dt = 0.005f;
 
-    // 2. 쿼터니언 미분 방정식 (부호 오류 수정 완료)
-    float q0 = x[0], q1 = x[1], q2 = x[2], q3 = x[3];
-    x[0] += 0.5f * (-q1 * wx - q2 * wy - q3 * wz) * dt;
-    x[1] += 0.5f * ( q0 * wx - q3 * wy + q2 * wz) * dt;
-    x[2] += 0.5f * ( q3 * wx + q0 * wy - q1 * wz) * dt; // +q3*wx 및 부호 순서 교정
-    x[3] += 0.5f * (-q2 * wx + q1 * wy + q0 * wz) * dt;
+    // -------------------------------------------------------------------------
+    // 1. 상태 및 공분산 예측 (State & Covariance Prediction)
+    // 지정 사양 동기화: Roll (+), Pitch (-), Yaw (+) 각속도 맵핑 완료
+    // -------------------------------------------------------------------------
+    float rate_roll  = gyro_rad.x;
+    float rate_pitch = gyro_rad.y;  // X축 내릴때 Pitch(-) 연산을 위해 정부호 입력 유지 (가속도 측정축과 동기화)
+    float rate_yaw   = gyro_rad.z;
 
-    // 3. 공분산 업데이트 및 클램핑
-    for(int i=0; i<4; i++) P[i][i] += Q_quat * dt;
-    for(int i=4; i<7; i++) P[i][i] += Q_bias * dt;
+    // 자이로 적분
+    estimated_attitude_.x += (rate_roll  - bias_.x) * dt;
+    estimated_attitude_.y += (rate_pitch - bias_.y) * dt;
+    estimated_attitude_.z += (rate_yaw   - bias_.z) * dt;
 
-    for(int i=0; i<7; i++) {
-        if (P[i][i] > 1.0f) P[i][i] = 1.0f;
-    }
-}
+    // 공분산 예측
+    Px00 += dt * (dt * Px11 - Px01 - Px10 + Q_angle_); Px01 -= dt * Px11; Px10 -= dt * Px11; Px11 += Q_gyro_ * dt;
+    Py00 += dt * (dt * Py11 - Py01 - Py10 + Q_angle_); Py01 -= dt * Py11; Py10 -= dt * Py11; Py11 += Q_gyro_ * dt;
+    Pz00 += dt * (dt * Pz11 - Pz01 - Pz10 + Q_angle_); Pz01 -= dt * Pz11; Pz10 -= dt * Pz11; Pz11 += Q_gyro_ * dt;
 
-void KalmanFilter::update_accel(float ax, float ay, float az) {
-    float norm = sqrtf(ax*ax + ay*ay + az*az);
-    if (norm < 0.5f || norm > 1.5f) return; 
-    ax /= norm; ay /= norm; az /= norm;
+    // -------------------------------------------------------------------------
+    // 2. 가속도계 데이터 측정 보정 (Accel Measurement Update)
+    // -------------------------------------------------------------------------
+    Vector3f norm_acc = acc;
+    normalizeVector(norm_acc);
 
-    // [수정] NED 좌표계 표준 기준 중력 전달 벡터 (가속도계 정립 시 az = -1 또는 1 매칭)
-    float q0 = x[0], q1 = x[1], q2 = x[2], q3 = x[3];
-    float vx = 2.0f * (q1*q3 - q0*q2);
-    float vy = 2.0f * (q0*q1 + q2*q3);
-    float vz = q0*q0 - q1*q1 - q2*q2 + q3*q3; 
+    // 지정 사양: X 내릴 때 PITCH (-) 가 되도록 가속도 부호 조정
+    float measured_pitch = std::atan2(norm_acc.x, std::sqrt(norm_acc.y * norm_acc.y + norm_acc.z * norm_acc.z));
+    // 지정 사양: Y 내릴 때 ROLL (+) 가 되도록 설정
+    float measured_roll  = std::atan2(norm_acc.y, norm_acc.z);
 
-    // Innovation (측정 오차)
-    float ex = (ay * vz - az * vy);
-    float ey = (az * vx - ax * vz);
-    float ez = (ax * vy - ay * vx);
+    // Roll 보정
+    float y_x = measured_roll - estimated_attitude_.x;
+    float S_x = Px00 + R_accel_;
+    float K_x0 = Px00 / S_x; float K_x1 = Px10 / S_x;
+    estimated_attitude_.x += K_x0 * y_x; bias_.x += K_x1 * y_x;
+    float Px00_tmp = Px00; float Px01_tmp = Px01;
+    Px00 -= K_x0 * Px00_tmp; Px01 -= K_x0 * Px01_tmp; Px10 -= K_x1 * Px00_tmp; Px11 -= K_x1 * Px01_tmp;
 
-    // 칼만 이득을 통한 상태 보정 수식 안전화
-    float K = 0.02f; 
-    x[0] += K * (-q1 * ex - q2 * ey - q3 * ez);
-    x[1] += K * ( q0 * ex + q2 * ez - q3 * ey);
-    x[2] += K * ( q3 * ex + q0 * ey - q1 * ez);
-    x[3] += K * (-q2 * ex + q1 * ey + q0 * ez);
+    // Pitch 보정
+    float y_y = measured_pitch - estimated_attitude_.y;
+    float S_y = Py00 + R_accel_;
+    float K_y0 = Py00 / S_y; float K_y1 = Py10 / S_y;
+    estimated_attitude_.y += K_y0 * y_y; bias_.y += K_y1 * y_y;
+    float Py00_tmp = Py00; float Py01_tmp = Py01;
+    Py00 -= K_y0 * Py00_tmp; Py01 -= K_y0 * Py01_tmp; Py10 -= K_y1 * Py00_tmp; Py11 -= K_y1 * Py01_tmp;
+
+        // -------------------------------------------------------------------------
+    // 3. 지자계 데이터 경사 보정 및 Yaw 최종 추적 연산
+    // -------------------------------------------------------------------------
+    float cos_r = std::cos(estimated_attitude_.x);
+    float sin_r = std::sin(estimated_attitude_.x);
+    float cos_p = std::cos(estimated_attitude_.y);
+    float sin_p = std::sin(estimated_attitude_.y);
+
+    // Tilt Compensation (기울기 평면 투영)
+    float Xh = mag.x * cos_p + mag.y * sin_p * sin_r + mag.z * sin_p * cos_r;
+    float Yh = mag.y * cos_r - mag.z * sin_r;
+
+    // [수정] 우회전(시계방향) 시 YAW 가 정상적으로 (+) 값을 가지도록 부호 전면 보정
+    float measured_yaw = std::atan2(Yh, Xh); 
+
+    // 각도 강제 정형화 오차 제어 헬퍼
+    auto normalize_angle = [](float& angle) {
+        while (angle > M_PI)  angle -= 2.0f * M_PI;
+        while (angle < -M_PI) angle += 2.0f * M_PI;
+    };
+    normalize_angle(estimated_attitude_.z);
+
+    // 추정치와 측정치의 위상 오차 계산
+    float yaw_error = measured_yaw - estimated_attitude_.z;
+    normalize_angle(yaw_error);
+
+    // Yaw 축 공분산 수식 및 최종 칼만 보정 반영
+    float S_z = Pz00 + R_mag_;
+    float K_z0 = Pz00 / S_z; 
+    float K_z1 = Pz10 / S_z;
     
-    // 바이어스 보정
-    x[4] -= K * 0.01f * ex;
-    x[5] -= K * 0.01f * ey;
-    x[6] -= K * 0.01f * ez;
-}
-
-void KalmanFilter::normalize_quat() {
-    float n = sqrtf(x[0]*x[0] + x[1]*x[1] + x[2]*x[2] + x[3]*x[3]);
-    if (n > 0.0f) {
-        float recip = 1.0f / n;
-        x[0] *= recip; x[1] *= recip; x[2] *= recip; x[3] *= recip;
-    }
-}
-
-void KalmanFilter::get_euler(float* roll, float* pitch, float* yaw) {
-    float q0 = x[0], q1 = x[1], q2 = x[2], q3 = x[3];
-    //[수정] NED 시스템에 정확히 부합하는 오일러 각도 추출식
-    *roll  = atan2f(2.0f * (q2 * q3 + q0 * q1), q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3) * 57.29578f;
-    *pitch = asinf(std::clamp(-2.0f * (q1 * q3 - q0 * q2), -1.0f, 1.0f)) * 57.29578f;
-    *yaw   = atan2f(2.0f * (q1 * q2 + q0 * q3), q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3) * 57.29578f;
-}
-
-void KalmanFilter::get_speed_err(float *rollspeed, float *pitchspeed, float* yawspeed)
-{
-    *rollspeed  = x[4];
-    *pitchspeed = x[5];
-    *yawspeed   = x[6];
-}
-
-void KalmanFilter::update(Vector3f &acc, Vector3f &gyro, Vector3f &mag, float dt)
-{
-    predict(gyro.x, gyro.y, gyro.z, dt);
-    update_accel(acc.x, acc.y, acc.z);
-    update_mag(mag.x, mag.y, mag.z);
-    normalize_quat();
-}
-
-void KalmanFilter::update(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz, float dt)
-{
-    predict(gx, gy, gz, dt);
-    update_accel(ax, ay, az);
-    update_mag(mx, my, mz);
-    normalize_quat();
-}
-
-void KalmanFilter::update(Vector3f &acc, Vector3f &gyro, float dt)
-{
-    predict(gyro.x, gyro.y, gyro.z, dt);
-    update_accel(acc.x, acc.y, acc.z);
-    normalize_quat();
-}
-
-void KalmanFilter::update_mag(float mx, float my, float mz) {
-    float norm = sqrtf(mx*mx + my*my + mz*mz);
-    if (norm < 0.1f) return;
-    mx /= norm; my /= norm; mz /= norm;
-
-    float q0 = x[0], q1 = x[1], q2 = x[2], q3 = x[3];
-
-    float hx = mx * (q0*q0 + q1*q1 - q2*q2 - q3*q3) + my * 2.0f * (q1*q2 - q0*q3) + mz * 2.0f * (q1*q3 + q0*q2);
-    float hy = mx * 2.0f * (q1*q2 + q0*q3) + my * (q0*q0 - q1*q1 + q2*q2 - q3*q3) + mz * 2.0f * (q2*q3 - q0*q1);
-    float bx = sqrtf(hx * hx + hy * hy);
-    float bz = mx * 2.0f * (q1*q3 - q0*q2) + my * 2.0f * (q2*q3 + q0*q1) + mz * (q0*q0 - q1*q1 - q2*q2 + q3*q3);
-
-    float wx = bx * (q0*q0 + q1*q1 - q2*q2 - q3*q3) + bz * 2.0f * (q1*q3 - q0*q2);
-    float wy = bx * 2.0f * (q1*q2 - q0*q3) + bz * 2.0f * (q0*q1 + q2*q3);
-    float wz = bx * 2.0f * (q0*q2 + q1*q3) + bz * (q0*q0 - q1*q1 - q2*q2 + q3*q3);
-
-    float ex_mag = (my * wz - mz * wy);
-    float ey_mag = (mz * wx - mx * wz);
-    float ez_mag = (mx * wy - my * wx);
-
-    float K = 0.01f;
-    x[0] += K * (-q1 * ex_mag - q2 * ey_mag - q3 * ez_mag);
-    x[1] += K * ( q0 * ex_mag + q2 * ez_mag - q3 * ey_mag);
-    x[2] += K * ( q0 * ey_mag - q1 * ez_mag + q3 * ex_mag);
-    x[3] += K * ( q0 * ez_mag + q1 * ey_mag - q2 * ex_mag);
+    estimated_attitude_.z += K_z0 * yaw_error; 
+    bias_.z               += K_z1 * yaw_error;
     
-    x[4] -= K * 0.1f * ex_mag;
-    x[5] -= K * 0.1f * ey_mag;
-    x[6] -= K * 0.1f * ez_mag;
+    float Pz00_tmp = Pz00; 
+    float Pz01_tmp = Pz01;
+    
+    Pz00 -= K_z0 * Pz00_tmp; 
+    Pz01 -= K_z0 * Pz01_tmp; 
+    Pz10 -= K_z1 * Pz00_tmp; 
+    Pz11 -= K_z1 * Pz01_tmp;
+
+    normalize_angle(estimated_attitude_.z);
+
 }
 
 } // namespace Filter

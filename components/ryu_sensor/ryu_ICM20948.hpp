@@ -43,6 +43,8 @@ class ICM20948 : public Interface::IImuSensor{
             data.gyro.x *= -1.0f;
             data.gyro.z *= -1.0f;
             data.mag.x  *= -1.0f;
+
+            //data.mag.z  *= -1.0f;
         }
 
         void calibration_mag_hard_iron();
@@ -106,9 +108,8 @@ class ICM20948 : public Interface::IImuSensor{
         Vector3f _acc_bias  {0.0f,0.0f,0.0f};
         Vector3f _gyro_bias {0.0f,0.0f,0.0f};
 
-        // 이전 측정값
+        // 이전 측정값 (값의 연속성을 위하여 이전값을 저장한다. 리딩 타임이 다르기 때문에....)
         Vector3f _mag_previous {0.0f,0.0f,0.0f};
-        uint64_t _mag_previous_time =0;
 
         bool _calibration = false;
         bool _initialized = false;
