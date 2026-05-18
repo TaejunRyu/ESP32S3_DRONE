@@ -23,17 +23,16 @@ class IST8310  : public Interface::IImuSensor{
         static inline constexpr uint8_t ADDR       =    0x0E; // 기본 주소 (ADR핀 상태에 따라 다를 수 있음)
 
         // 인터페이스 주입 (핵심!)
-        void set_ibus(Interface::IBus* bus) { _ibus = bus; }
-        Interface::IBus* get_ibus(){ return _ibus;};    
+        void set_bus(Interface::IBus* bus) { _ibus = bus; }
+        Interface::IBus* get_bus(){ return _ibus;};    
         esp_err_t initialize() override;
         esp_err_t deinitialize() override;
-        esp_err_t updateSample(ImuData& sample) override;
+        esp_err_t updateSample(ImuData &sample) override;
         bool is_initialized(){return _initialized;};
-
-        void calibrate_hard_iron();
-        esp_err_t init_ibus(Interface::IBus *bus);
+        
         esp_err_t read_data(Vector3f data);
         esp_err_t read_with_offset(Vector3f data);
+        void calibrate_hard_iron();
 
     private:
         static inline constexpr float FILTER_ALPHA = 0.4f; 
@@ -58,7 +57,7 @@ class IST8310  : public Interface::IImuSensor{
         static inline constexpr float MAG_SCALE_X   =  0.98f;
         static inline constexpr float MAG_SCALE_Y   =  0.99f;
         static inline constexpr float MAG_SCALE_Z   =  1.03f;
-
+        
         Interface::IBus* _ibus = nullptr; // 하드웨어 추상화 레이어
         Vector3f _mag_offset ={MAG_OFFSET_X,MAG_OFFSET_Y,MAG_OFFSET_Z};
         Vector3f _mag_scale ={MAG_SCALE_X,MAG_SCALE_Y,MAG_SCALE_Z};

@@ -22,7 +22,6 @@ class ICM20948 : public Interface::IImuSensor{
         static inline constexpr uint8_t ADDR_GND = 0x68;
         
         // 인터페이스 주입 (핵심!)
-        esp_err_t init_bus(Interface::IBus *bus);
         void set_bus(Interface::IBus* bus);
         Interface::IBus* get_bus(){ return _ibus;};   
 

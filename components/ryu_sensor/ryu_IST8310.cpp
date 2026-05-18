@@ -108,9 +108,27 @@ esp_err_t IST8310::deinitialize()
     return ESP_OK; 
 }
 
+
+
+
 esp_err_t IST8310::updateSample(ImuData &sample)
 {
-    return esp_err_t();
+      // 1. 하드웨어 버스 연결 상태 방어적 체크
+    if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        
+    
+    Vector3f data;
+    esp_err_t err = read_data(data); // 칩 레지스터 일괄 리딩 (내부에서 mag 데이터 및 플래그 갱신됨)
+    
+    // 2. 통신이 완벽하게 성공한 경우에만 상위 객체로 데이터 복사
+    if (err == ESP_OK){
+        sample.mag    = (data -_mag_offset) * _mag_scale;
+        _mag_previous =sample.mag;   //정상으로 읽었을때 자료 보관.       
+        sample.is_mag_updated = true;
+    }else{
+        sample.is_mag_updated = false;
+        sample.mag = _mag_previous;
+    }
+    return err;
 }
 
 
@@ -146,9 +164,7 @@ esp_err_t IST8310::read_data(Vector3f data){
         _mag_previous = raw_data;
     } else {
         // 이전 값과 현재 값의 가중치 평균을 구합니다.
-        _mag_previous[0] = _mag_previous[0] + FILTER_ALPHA * (raw_data[0] - _mag_previous[0]);
-        _mag_previous[1] = _mag_previous[1] + FILTER_ALPHA * (raw_data[1] - _mag_previous[1]);
-        _mag_previous[2] = _mag_previous[2] + FILTER_ALPHA * (raw_data[2] - _mag_previous[2]);
+        _mag_previous = _mag_previous + (raw_data - _mag_previous) * FILTER_ALPHA ;
     }
     data =_mag_previous;
     return ESP_OK;
@@ -237,13 +253,5 @@ void IST8310::calibrate_hard_iron()
     }
 }
 
-esp_err_t IST8310::init_ibus(Interface::IBus* bus) {
-    if (!bus) return ESP_FAIL;
-    
-    if (_ibus) delete _ibus; // 기존에 할당된 버스가 있다면 해제
-    _ibus = bus;            // 새로 생성된 I2CBus 또는 SPIBus 주입
-    
-    return ESP_OK;
-}
 
 } //namespace Sensor

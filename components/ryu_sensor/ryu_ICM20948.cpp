@@ -26,13 +26,6 @@ ICM20948::~ICM20948()
     }
 }
 
-esp_err_t ICM20948::init_bus(Interface::IBus *bus)
-{
-    if (bus == nullptr) return ESP_FAIL;
-    if (_ibus) delete _ibus; // 기존에 할당된 버스가 있다면 해제
-    _ibus = bus;            // 새로 생성된 I2CBus 또는 SPIBus 주입
-    return ESP_OK;
-}
 
 void ICM20948::set_bus(Interface::IBus *bus){
     if (_ibus != nullptr) {
@@ -67,11 +60,11 @@ esp_err_t ICM20948::enable_mag_bypass()
         _ibus->Write(B0_USER_CTRL, 0x00);    
         vTaskDelay(pdMS_TO_TICKS(10));
 
-        // 2. Bank 3: 보조 I2C 버스를 깨우기 위한 필수 클럭 가동 (가장 중요)
+        // 2. Bank 3: 보조 I2C 버스를 깨우기 위한 필수 클럭 가동 (원래 정상 주소 복구)
         select_bank(3); esp_rom_delay_us(50);
-        _ibus->Write(B3_I2C_MST_CTRL, 0x1D);       // I2C Master 클럭 ~400kHz 세팅
-        _ibus->Write(0x01, 0x0D);                  // I2C_MST_CTRL (MULT_MST_EN 등 칩 특성 반영)
-        _ibus->Write(0x02, 0x80);                  // I2C_MST_DELAY_CTRL: 지연 레지스터 활성화
+        _ibus->Write(B3_I2C_MST_CTRL, 0x1D);       // I2C Master 클럭 세팅
+        _ibus->Write(0x01, 0x0D);                  // [복구] I2C_MST_ODR_CONFIG 주기 설정
+        _ibus->Write(0x02, 0x80);                  // [복구] I2C_MST_DELAY_CTRL 활성화
         vTaskDelay(pdMS_TO_TICKS(10));
 
         // 3. Bank 0: 내부 I2C Master 엔진 활성화 (USER_CTRL의 I2C_MST_EN 비트 켜기)
@@ -85,17 +78,19 @@ esp_err_t ICM20948::enable_mag_bypass()
         _ibus->Write(B3_I2C_SLV4_REG, 0x30);       // CNTL1 (Reset)
         _ibus->Write(B3_I2C_SLV4_DO, 0x01);        // Soft Reset 명령값
         _ibus->Write(B3_I2C_SLV4_CTRL, 0x80);      // SLV4_EN (1회 전송 촉발)
-        vTaskDelay(pdMS_TO_TICKS(50));             // 리셋 완료 대기
+        
+        // ⭐ [핵심 교정] 리셋 명령이 날아간 후 센서가 내부 초기화를 완료할 최소한의 마진을 확보합니다.
+        // 기존 10ms에서 40ms 증가시켜 50ms로 대기시간을 조정합니다. (부팅 초기 락 방지 핵심)
+        vTaskDelay(pdMS_TO_TICKS(50));             
 
         // 5. Bank 3 (Slave 4 단발성 통신): 지자계 100Hz 연속 측정 모드 2 설정
         _ibus->Write(B3_I2C_SLV4_ADDR, 0x0C); 
         _ibus->Write(B3_I2C_SLV4_REG, 0x31);       // CNTL2 (Operation Mode)
         _ibus->Write(B3_I2C_SLV4_DO, 0x08);        // 0x08 = Continuous Measurement 2 (100Hz)
         _ibus->Write(B3_I2C_SLV4_CTRL, 0x80);      // 1회 전송 촉발
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(30));             // 모드 진입이 적용될 때까지 대기
 
         // 6. Bank 3 (Slave 0 백그라운드 스케줄러): 오토 리딩 영구 등록
-        // ★ [핵심 주소 처리] SPI 환경에 따라 최상위 비트(0x80)가 유실될 수 있으므로 주소 확인 필수
         _ibus->Write(B3_I2C_SLV0_ADDR, 0x0C | 0x80); // 0x8C = 지자계 Read 주소
         _ibus->Write(B3_I2C_SLV0_REG, 0x10);         // ST1 레지스터(0x10)부터 읽기 시작
         _ibus->Write(B3_I2C_SLV0_CTRL, 0x89);        // 0x89 = Slave 활성화(0x80) + 9바이트 읽기(0x09)
@@ -103,7 +98,9 @@ esp_err_t ICM20948::enable_mag_bypass()
         // Slave 0이 스케줄러에 동기화되어 밀리지 않도록 지연 섀도우 처리
         _ibus->Write(0x09, 0x01);                  // I2C_SLV0_DELAY_SHDW = 1
         
-        select_bank(0); esp_rom_delay_us(50);
+        // 7. 모든 초기화 완료 후 첫 백그라운드 스케줄링 데이터가 레지스터에 섀도잉 안착될 대기시간
+        select_bank(0); 
+        vTaskDelay(pdMS_TO_TICKS(150)); 
         ESP_LOGI(TAG, "SPI Sensor Hub Successfully Configured.");
     }
     return ESP_OK;
@@ -129,71 +126,79 @@ esp_err_t ICM20948::select_bank(uint8_t bank)
  * @param raw 
  * @return esp_err_t 
  */
+#include <math.h> // 함수 외부 상단에 포함되어 있는지 확인하세요.
+
 esp_err_t ICM20948::read_data(ImuData &raw) {
     if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        
     
     esp_err_t err = ESP_OK;
+    raw.timestamp = esp_timer_get_time(); // 타이밍 정확성을 위해 최상단에서 시간 측정
+    
     select_bank(0);
     
     if (_ibus->get_type() == Interface::BusType::I2C) {
-        uint8_t d[12]{0,};
-        err = _ibus->Read(B0_ACCEL_XOUT_H, d, 12);
+        // I2C 모드: 가속도(6) + 자이로(6) + 온도(2) = 총 14바이트 연속 읽기
+        uint8_t d[14]{0,};
+        err = _ibus->Read(B0_ACCEL_XOUT_H, d, 14);
         if (err != ESP_OK) return err;
 
-        raw.acc.x = (int16_t)((d[0] << 8) | d[1]) * ACCEL_SCALE;
-        raw.acc.y = (int16_t)((d[2] << 8) | d[3]) * ACCEL_SCALE;
-        raw.acc.z = (int16_t)((d[4] << 8) | d[5]) * ACCEL_SCALE;
-        raw.gyro.x = (int16_t)((d[6] << 8) | d[7])  * GYRO_SCALE;
-        raw.gyro.y = (int16_t)((d[8] << 8) | d[9])  * GYRO_SCALE;
-        raw.gyro.z = (int16_t)((d[10] << 8) | d[11])* GYRO_SCALE;
-        raw.timestamp = esp_timer_get_time();
-        raw.is_mag_updated = false;
+        raw.acc.x = (float)((int16_t)((d[0] << 8) | d[1])) * ACCEL_SCALE;
+        raw.acc.y = (float)((int16_t)((d[2] << 8) | d[3])) * ACCEL_SCALE;
+        raw.acc.z = (float)((int16_t)((d[4] << 8) | d[5])) * ACCEL_SCALE;
+        
+        raw.gyro.x = (float)((int16_t)((d[6] << 8) | d[7])) * GYRO_SCALE;
+        raw.gyro.y = (float)((int16_t)((d[8] << 8) | d[9])) * GYRO_SCALE;
+        raw.gyro.z = (float)((int16_t)((d[10] << 8) | d[11])) * GYRO_SCALE;
+        
+        raw.temperature = (float)((int16_t)((d[12] << 8) | d[13])); 
+        raw.is_mag_updated = false; 
     } 
     else {
-        // 24바이트 연속 리딩으로 확장 (Accel 6 + Gyro 6 + Temp 2 + Mag_Status/Data 10)
-        // 💡 기존 22바이트에서 온도 데이터 2바이트를 온전히 포함하기 위해 24바이트 구조로 확장해야 완벽하게 마감됩니다.
-        uint8_t d[24];
+        // SPI 모드: 24바이트 연속 리딩 (Accel 6 + Gyro 6 + Temp 2 + Mag 10)
+        uint8_t d[24]{0,};
         err = _ibus->Read(B0_ACCEL_XOUT_H, d, 24);
         if (err != ESP_OK) return err;
 
-        // 1. 가속도 및 자이로 변환 (정상 유지)
-        raw.acc.x = (int16_t)((d[0] << 8) | d[1])    * ACCEL_SCALE;
-        raw.acc.y = (int16_t)((d[2] << 8) | d[3])    * ACCEL_SCALE;
-        raw.acc.z = (int16_t)((d[4] << 8) | d[5])    * ACCEL_SCALE;
+        raw.acc.x = (float)((int16_t)((d[0] << 8) | d[1])) * ACCEL_SCALE;
+        raw.acc.y = (float)((int16_t)((d[2] << 8) | d[3])) * ACCEL_SCALE;
+        raw.acc.z = (float)((int16_t)((d[4] << 8) | d[5])) * ACCEL_SCALE;
 
-        raw.gyro.x = (int16_t)((d[6] << 8) | d[7])   * GYRO_SCALE;
-        raw.gyro.y = (int16_t)((d[8] << 8) | d[9])   * GYRO_SCALE;
-        raw.gyro.z = (int16_t)((d[10] << 8) | d[11]) * GYRO_SCALE;
+        raw.gyro.x = (float)((int16_t)((d[6] << 8) | d[7])) * GYRO_SCALE;
+        raw.gyro.y = (float)((int16_t)((d[8] << 8) | d[9])) * GYRO_SCALE;
+        raw.gyro.z = (float)((int16_t)((d[10] << 8) | d[11])) * GYRO_SCALE;
         
-        // 💡 [참고] d[12], d[13] 은 내부 온도 데이터 레지스터 공간입니다.
-        raw.temperature = (int16_t)((d[12] << 8) | d[13]); 
-        raw.timestamp = esp_timer_get_time();
+        raw.temperature = (float)((int16_t)((d[12] << 8) | d[13])); 
 
-        // 2. [💡 하드웨어 인덱스 정밀 교정] 지자계 상태 레지스터 주소 매핑 바로잡기
-        // 가속도(6) + 자이로(6) + 온도(2) = 총 14바이트 이후부터 지자계 데이터가 시작됩니다.
-        uint8_t st1 = d[14]; // ◀ 15번째 바이트(d[14])가 정확한 AK09916의 ST1 레지스터입니다.
-        uint8_t st2 = d[23]; // ◀ 24바이트 연속 리딩의 맨 마지막 바이트(d[23])가 진짜 ST2 레지스터입니다.
+        // 지자계 상태 레지스터 추출
+        uint8_t st1 = d[14]; 
+        uint8_t st2 = d[23]; // ※ 주의: SLV0 설정이 10바이트 읽기여야 올바른 위치입니다.
 
-        // ST2 레지스터의 HOFL(오버플로우) 비트 검증
-        if (st2 & 0x08) {
+        // 1단계 비트 결합: AK09916 리틀 엔디안 결합을 int16_t 정수형으로 명확하게 처리
+        int16_t raw_mag_x = (int16_t)((d[16] << 8) | d[15]);
+        int16_t raw_mag_y = (int16_t)((d[18] << 8) | d[17]);
+        int16_t raw_mag_z = (int16_t)((d[20] << 8) | d[19]);
+
+        // 지자계 최종 스케일 변환 (float 형 대응)
+        raw.mag.x = (float)raw_mag_x * MAG_SCALE; 
+        raw.mag.y = (float)raw_mag_y * MAG_SCALE;
+        raw.mag.z = (float)raw_mag_z * MAG_SCALE;            
+
+        // ⚠️ 방어 코드: ST2의 오버플로우(HOFL) 비트가 켜졌거나, 데이터가 모두 완전한 0인 물리적 락 상태 검증
+        if ((st2 & 0x08) || (fabsf(raw.mag.x) < 0.0001f && fabsf(raw.mag.y) < 0.0001f && fabsf(raw.mag.z) < 0.0001f)) {
             select_bank(0);
-            _ibus->Write(B0_USER_CTRL, 0x02); // I2C_MST_RST
-            esp_rom_delay_us(10);
-            _ibus->Write(B0_USER_CTRL, 0x20); // I2C_MST_EN
-            return ESP_FAIL;
+            _ibus->Write(B0_USER_CTRL, 0x02); // I2C_MST_RST (마스터 리셋으로 락 해제)
+            vTaskDelay(pdMS_TO_TICKS(5));     // 버스 안정화를 위해 5ms 대기
+            _ibus->Write(B0_USER_CTRL, 0x20); // I2C_MST_EN  (마스터 재가동)
+            
+            raw.is_mag_updated = false;
+            return ESP_FAIL; 
         }
 
-        // 3. 지자계 데이터 갱신 여부 및 물리 변환 처리 (인덱스 시프트 완료)
+        // 지자계 데이터 정상 갱신 검사 (Data Ready)
         if (st1 & 0x01) {
             raw.is_mag_updated = true;
             raw.mag_timestamp = raw.timestamp;
-
-            // 💡 AK09916 지자계 데이터 레지스터는 리틀 엔디안(Little-Endian) 구조입니다!
-            // 고로 LSB가 앞(d[15]), MSB가 뒤(d[16])에 오는 것이 완벽한 하드웨어 스펙 매칭입니다.
-            raw.mag.x = (int16_t)((d[16] << 8) | d[15]) * MAG_SCALE; 
-            raw.mag.y = (int16_t)((d[18] << 8) | d[17]) * MAG_SCALE;
-            raw.mag.z = (int16_t)((d[20] << 8) | d[19]) * MAG_SCALE;            
-        } else {
+        } else { 
             raw.is_mag_updated = false;
         }
     }
@@ -333,6 +338,7 @@ esp_err_t ICM20948::updateSample(ImuData& sample){
             _mag_previous =sample.mag;   //정상으로 읽었을때 자료 보관.
  
         }else{
+            sample.is_mag_updated = false;
             sample.mag = _mag_previous; // 읽지 못하였을경우 이전값으로....
         }     
        
@@ -358,11 +364,6 @@ esp_err_t  ICM20948::calibration_loop(const ImuData& data, int sample_count){
         _gyro_bias  = _gyro_bias * (1.0f / CALIBRATION_COUNT);
         _acc_bias   = _acc_bias  * (1.0f / CALIBRATION_COUNT);
         _calibration = true;
-        // ESP_LOGW(TAG,"Bias=> _acc_bias.x: %8.6f | _acc_bias.y: %8.6f | _acc_bias.z: %8.6f",
-        //     _acc_bias.x,_acc_bias.y,_acc_bias.z);
-
-        // ESP_LOGW(TAG,"Bias=> _gyro_bias.x: %8.6f | _gyro_bias.y: %8.6f | _gyro_bias.z: %8.6f",
-        //     _gyro_bias.x,_gyro_bias.y,_gyro_bias.z);
     }
     return ESP_OK;
 }
