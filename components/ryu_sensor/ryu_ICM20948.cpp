@@ -7,10 +7,11 @@
 #include <esp_timer.h>
 #include <esp_task_wdt.h>
 #include "ryu_BusInterface.hpp"
-#include "ryu_DroneConfig.hpp"
+#include "ryu_Config.hpp"
 
 
 namespace Sensor{
+    
 // 생성자 구현
 ICM20948::ICM20948() {
     // 초기화 코드...

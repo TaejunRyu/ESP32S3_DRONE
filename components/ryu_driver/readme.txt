@@ -1,5 +1,6 @@
-1. I2C
-2. SPI
-3. UART
-4. MOTOR
-5. ADC
+1. I2C  
+    1) IST8310
+2. SPI 
+    1) ICM20948
+    2) AK09916
+    3) BMP388 

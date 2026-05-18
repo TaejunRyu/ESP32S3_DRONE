@@ -8,7 +8,10 @@ idf_component_register(
         "."
     REQUIRES 
         esp_timer
+        esp_wifi
         freertos
+        nvs_flash
+        mavlink
         ryu_system
         ryu_sensor
         ryu_driver

@@ -30,6 +30,7 @@ class ICM20948 : public Interface::IImuSensor{
         esp_err_t   initialize() override;
         esp_err_t   deinitialize()  override;
         esp_err_t   updateSample(ImuData& sample) override;
+        esp_err_t   read_data(ImuData& raw);
         esp_err_t   enable_mag_bypass();
         bool        is_initialized() { return _initialized; };
         esp_err_t   calibration_loop(const ImuData &data, int sample_count);
@@ -48,6 +49,13 @@ class ICM20948 : public Interface::IImuSensor{
         }
 
         void calibration_mag_hard_iron();
+        Vector3f get_acc_bias(){return _acc_bias;};
+        Vector3f get_gyro_bias(){return _gyro_bias;};
+        Vector3f get_mag_offset(){return _mag_offset;};
+        Vector3f get_mag_scale(){return _mag_scale;};
+        Vector3f get_mag_previous(){return _mag_previous;};
+        void set_mag_previous(Vector3f mag){ _mag_previous = mag;};
+
 
     private:
         // LOOP내에서 자동으로 처음 COUNT반큼 돌면서 BIAS측정
@@ -94,7 +102,6 @@ class ICM20948 : public Interface::IImuSensor{
         static inline constexpr float MAG_SCALE      =  0.15f;     
 
         esp_err_t select_bank(uint8_t bank);
-        esp_err_t read_data(ImuData& raw);
 
         const float _lpf_alpha = 0.2f; 
         Vector3f _last_filtered_accel;

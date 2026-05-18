@@ -4,7 +4,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "ryu_DroneTypes.hpp"
+#include "ryu_Types.hpp"
 #include "ryu_ICM20948.hpp"
 #include "ryu_SharedDataManager.hpp"
 

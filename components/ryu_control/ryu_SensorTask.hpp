@@ -1,5 +1,8 @@
 #pragma once
 
+#include <esp_err.h>
+#include "ryu_Types.hpp"
+
 // 전방 선언 (Forward Declaration)을 통해 컴파일 속도를 최적화합니다.
 namespace Sensor {
     class ICM20948;
@@ -24,6 +27,7 @@ public:
 
     // [방어 설계] 동적 할당된 센서 객체를 안전하게 해제하도록 소멸자를 명시합니다.
     ~SensorTask();
+    esp_err_t updateSample(ImuData& sample);
 
     // FreeRTOS 태스크 진입용 static 함수
     static void ReadSensorTask(void* pvParameters);

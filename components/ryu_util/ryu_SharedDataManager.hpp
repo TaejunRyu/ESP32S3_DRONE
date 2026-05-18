@@ -9,7 +9,7 @@
  */
 
 #pragma once
-#include "ryu_DroneTypes.hpp"
+#include "ryu_Types.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <atomic> // 💡 멀티코어 간 정밀 동기화를 위한 원자성 헤더 추가

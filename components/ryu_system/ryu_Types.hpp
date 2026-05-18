@@ -86,6 +86,20 @@ struct Vector3f {
     }
 };
 
+
+template <typename T>
+struct Vector{
+    union {
+        T data[3];
+        struct{
+            T x ;
+            T y ;
+            T z ;
+        };
+    };
+};
+
+
 // 2. 오일러 각도 기반 드론 자세 데이터
 struct Attitude {
     union{

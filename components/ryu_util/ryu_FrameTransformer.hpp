@@ -10,7 +10,7 @@
  * 
  */
 #pragma once
-#include "ryu_DroneTypes.hpp" // Vector3f 및 ImuData 구조체가 정의된 헤더
+#include "ryu_Types.hpp" // Vector3f 및 ImuData 구조체가 정의된 헤더
 
 namespace Utils {
 
