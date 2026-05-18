@@ -25,7 +25,7 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
     Driver::SPI& spi = Driver::SPI::get_instance();
     spi.initialize();
 
-    Interface::IBus* bus_interface = Interface::createBIF(spi.get_host(), 9);
+    Interface::IBus* bus_interface = Interface::createBIF(spi.get_host(), SPI_CS_PIN);
 
     // 동적 할당 및 NULL 포인터 검증 예외 처리
     task->_icm20948 = new (std::nothrow) Sensor::ICM20948();

@@ -1,15 +1,12 @@
 #pragma once
 
-#include "ryu_ICM20948.hpp"
-#include "ryu_SharedDataManager.hpp"
-
 // 전방 선언 (Forward Declaration)을 통해 컴파일 속도를 최적화합니다.
-// namespace Sensor {
-//     class ICM20948;
-// }
-// namespace Utils {
-//     class SharedDataManager;
-// }
+namespace Sensor {
+    class ICM20948;
+}
+namespace Utils {
+    class SharedDataManager;
+}
 
 namespace Service { 
 
@@ -20,6 +17,7 @@ private:
     Utils::SharedDataManager    *_data_manager;
 
 public:
+    inline static constexpr int SPI_CS_PIN = 9;
     // [방어 설계] 생성자에서 모든 포인터를 nullptr로 확실하게 초기화하여 쓰레기 값을 방지합니다.
     SensorTask() 
         : _icm20948(nullptr), _data_manager(nullptr) {}

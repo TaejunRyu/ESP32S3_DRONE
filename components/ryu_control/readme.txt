@@ -19,9 +19,9 @@
     10) namespace 는 Filter 이다 
     11) #pragma once 사용
 
-3. PID Controller 구현
+3. PID Controller 구현 (구현 해야할것)
     1) 위 내용은 NED를 기준으로 처리하고 있다. 
-    2) PidController class 구현
+    2) PidController class 구현 (singleton으로)
     3) namespace Controller
     4) filename  ryu_PidController.hpp , ryu_PidController.cpp
     5) 캐스케이드(2중 루프) PID 클래스 구조로 코드를 설계

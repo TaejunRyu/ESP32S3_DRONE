@@ -72,20 +72,32 @@ void KalmanFilter::update(const Vector3f& acc, const Vector3f& gyro_rad, const V
     // Roll 보정
     float y_x = measured_roll - estimated_attitude_.x;
     float S_x = Px00 + R_accel_;
-    float K_x0 = Px00 / S_x; float K_x1 = Px10 / S_x;
-    estimated_attitude_.x += K_x0 * y_x; bias_.x += K_x1 * y_x;
-    float Px00_tmp = Px00; float Px01_tmp = Px01;
-    Px00 -= K_x0 * Px00_tmp; Px01 -= K_x0 * Px01_tmp; Px10 -= K_x1 * Px00_tmp; Px11 -= K_x1 * Px01_tmp;
+    float K_x0 = Px00 / S_x; 
+    float K_x1 = Px10 / S_x;
+    estimated_attitude_.x += K_x0 * y_x; 
+    bias_.x += K_x1 * y_x;
+    float Px00_tmp = Px00; 
+    float Px01_tmp = Px01;
+    Px00 -= K_x0 * Px00_tmp; 
+    Px01 -= K_x0 * Px01_tmp; 
+    Px10 -= K_x1 * Px00_tmp; 
+    Px11 -= K_x1 * Px01_tmp;
 
     // Pitch 보정
     float y_y = measured_pitch - estimated_attitude_.y;
     float S_y = Py00 + R_accel_;
-    float K_y0 = Py00 / S_y; float K_y1 = Py10 / S_y;
-    estimated_attitude_.y += K_y0 * y_y; bias_.y += K_y1 * y_y;
-    float Py00_tmp = Py00; float Py01_tmp = Py01;
-    Py00 -= K_y0 * Py00_tmp; Py01 -= K_y0 * Py01_tmp; Py10 -= K_y1 * Py00_tmp; Py11 -= K_y1 * Py01_tmp;
+    float K_y0 = Py00 / S_y; 
+    float K_y1 = Py10 / S_y;
+    estimated_attitude_.y += K_y0 * y_y; 
+    bias_.y += K_y1 * y_y;
+    float Py00_tmp = Py00; 
+    float Py01_tmp = Py01;
+    Py00 -= K_y0 * Py00_tmp; 
+    Py01 -= K_y0 * Py01_tmp; 
+    Py10 -= K_y1 * Py00_tmp; 
+    Py11 -= K_y1 * Py01_tmp;
 
-        // -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     // 3. 지자계 데이터 경사 보정 및 Yaw 최종 추적 연산
     // -------------------------------------------------------------------------
     float cos_r = std::cos(estimated_attitude_.x);
