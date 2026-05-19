@@ -109,7 +109,7 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
                 
                 // 💡 [선택적 방어 코드] 교정 중인 로그 출력 (지나친 로그 방지를 위해 100번에 한 번씩)
                 if (cal_sample_count % 100 == 0) {
-                    ESP_LOGI(TAG, "센서 교정 중... (%d / 1000)", cal_sample_count);
+                    ESP_LOGI(TAG, "센서 교정 중... (%d / %d)", cal_sample_count,task->_icm20948->CALIBRATION_COUNT);
                 }
                 
                 if (task->_icm20948->is_calibration()) {
@@ -121,7 +121,7 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
                 // 0점 교정이 끝난 실전 비행 모드 데이터 정제 작업
                 task->_icm20948->apply_filter(imu_data);
                 task->_icm20948->align_NED(imu_data);
-                imu_data.mag.norm();
+                imu_data.mag.normalize();
                 task->_data_manager->update_latest_imu(imu_data);
                 // if (++loop_cnt >= 50) { 
                 //     loop_cnt = 0;

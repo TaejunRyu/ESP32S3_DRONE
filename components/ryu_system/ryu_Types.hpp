@@ -77,18 +77,19 @@ struct Vector3f {
     float operator[](int index) const { return data[index]; }
     float& operator[](int index) { return data[index]; }
 
-    Vector3f& norm(){
+
+    Vector3f& normalize(){
         float norm = sqrtf( x * x + y * y + z * z);
         if (norm > 0.0f) {
-            *this = *this /norm;
+            *this = *this / norm;
         }
         return *this;
     }
 };
 
-
+// float가 아니 다른 변수들의 활용을 위함. 
 template <typename T>
-struct Vector{
+struct Vector3{
     union {
         T data[3];
         struct{
@@ -97,6 +98,55 @@ struct Vector{
             T z ;
         };
     };
+    constexpr Vector3(const Vector3&) = default;
+    Vector3() = default;
+    Vector3( T _x, T _y, T _z) : x(_x), y(_y), z(_z) {} 
+    // 연산자 오버로딩: 센서 오프셋이나 필터 연산을 직관적으로 만들기 위함
+    Vector3<T> operator+(const Vector3<T>& other) const {
+        return Vector3<T>(x + other.x, y + other.y, z + other.z);
+    }
+    Vector3<T> operator-(const Vector3<T>& other) const {
+        return Vector3<T>(x - other.x, y - other.y, z - other.z);
+    }
+
+    Vector3<T> operator*(float scalar) const {
+        return Vector3<T>(x * scalar, y * scalar, z * scalar);
+    }
+    Vector3<T> operator*(const Vector3<T>& other) const {
+        return Vector3<T>(x * other.x, y * other.y, z * other.z);
+    }
+    Vector3<T> operator/(int scalar) const {
+        return Vector3<T>(x / scalar, y / scalar, z / scalar);
+    }
+    Vector3<T> operator/(float scalar) const {
+        return Vector3<T>(x / scalar, y / scalar, z / scalar);
+    }
+   // 4. 안전한 대입 연산자 (자기 대입 방어 코드 포함)
+    Vector3<T>& operator=(const Vector3<T>& other) {
+        if (this != &other) { 
+            x = other.x; 
+            y = other.y;
+            z = other.z;
+        }
+        return *this;
+    }
+
+    Vector3<T>& operator=(float scalar) {
+        x = scalar; y = scalar; z = scalar;
+        return *this;
+    }
+     // [덤] 배열처럼 인덱스로 접근하고 싶을 때를 위한 연산자 추가 (예: vec[0] -> x축)
+    T operator[](int index) const { return data[index]; }
+    T& operator[](int index) { return data[index]; }
+
+
+    Vector3<T>& normalize(){
+        float norm = sqrtf( x * x + y * y + z * z);
+        if (norm > 0.0f) {
+            *this = *this / norm;
+        }
+        return *this;
+    }
 };
 
 
@@ -136,10 +186,38 @@ struct ImuData {
     Utils::CoordSystem current_coordSystem;
 };
 
+
+
+/**
+ * @brief 
+ * 
+ */
 struct BaroData {
     uint64_t timestamp;
     float pressure;    // 기압 (hPa)
     float altitude;    // 계산된 상대 고도 (m)
     float temperature;
     bool is_updated;
+};
+
+
+
+
+/**
+ * @brief  
+ *      1. qgc에 연결하기위하여 bridge을 경유해야한다.
+ *      2. mavlink로 communication
+ *      3. 
+ * 
+ */
+struct _QgcInfo{
+    struct MavlinkInfo{
+        size_t sys_id;
+        size_t comp_id;
+        size_t channel;     //기본은 MAVLINK_COM_0 
+    };
+
+    struct BridgeInfo{
+        uint8_t bridge_mac[6];    
+    };
 };

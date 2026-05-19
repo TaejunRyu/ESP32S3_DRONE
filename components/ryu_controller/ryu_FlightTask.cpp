@@ -18,7 +18,7 @@
 #include "ryu_espnow.hpp"
 
 
-namespace Control {
+namespace Controller {
 
 esp_err_t Flight::initialize(){
     return ESP_OK;

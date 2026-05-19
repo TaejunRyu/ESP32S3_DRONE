@@ -21,6 +21,9 @@ class ICM20948 : public Interface::IImuSensor{
         static inline constexpr uint8_t ADDR_VCC = 0x69;
         static inline constexpr uint8_t ADDR_GND = 0x68;
         
+        // LOOP내에서 자동으로 처음 COUNT반큼 돌면서 BIAS측정
+        static inline constexpr uint16_t CALIBRATION_COUNT = 2000;
+
         // 인터페이스 주입 (핵심!)
         void set_bus(Interface::IBus* bus);
         Interface::IBus* get_bus(){ return _ibus;};   
@@ -57,8 +60,7 @@ class ICM20948 : public Interface::IImuSensor{
 
 
     private:
-        // LOOP내에서 자동으로 처음 COUNT반큼 돌면서 BIAS측정
-        static inline constexpr uint16_t CALIBRATION_COUNT = 1000;    
+            
 
         // I2C && SPI 레지스터 및 상수 정의
         static inline constexpr uint8_t REG_BANK_SEL = 0x7F;

@@ -15,7 +15,7 @@
 
 #include <esp_err.h>
 
-namespace Control{
+namespace Controller{
 
 class Flight{
     private:

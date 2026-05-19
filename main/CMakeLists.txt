@@ -7,6 +7,6 @@ idf_component_register(
     REQUIRES 
         esp_event
         nvs_flash
-        ryu_control
+        ryu_controller
 
 )
