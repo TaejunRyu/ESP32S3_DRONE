@@ -2,19 +2,22 @@ file(GLOB_RECURSE SOURCES "*.cpp") # 폴더 내 모든 cpp 파일을 SOURCES 변
 
 idf_component_register(
     SRCS ${SOURCES}
-      
+
     INCLUDE_DIRS 
         "."  
-
     REQUIRES
-        esp_timer 
-        esp_driver_uart
+        esp_timer
+        esp_event
         esp_driver_gpio
-        esp_driver_spi
-        esp_driver_i2c
+        esp_driver_mcpwm
+        esp_pm
+        esp_wifi
+        nvs_flash
+        driver
         freertos
-        ryu_interface
+        mavlink
+        ryu_service
         ryu_system
-        ryu_util
-        ryu_driver
+        ryu_sensor
+    
 )

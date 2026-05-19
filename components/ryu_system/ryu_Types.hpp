@@ -1,5 +1,5 @@
 /**
- * @file ryu_DroneTypes.hpp
+ * @file ryu_Types.hpp
  * @author your name (you@domain.com)
  * @brief 
  *      1. 시스템에서 사용되어지는 데이터 타입선언.
@@ -187,7 +187,6 @@ struct ImuData {
 };
 
 
-
 /**
  * @brief 
  * 
@@ -210,14 +209,14 @@ struct BaroData {
  *      3. 
  * 
  */
-struct _QgcInfo{
+struct QgcInfo{
     struct MavlinkInfo{
         size_t sys_id;
         size_t comp_id;
         size_t channel;     //기본은 MAVLINK_COM_0 
-    };
+    }mavlink;
 
     struct BridgeInfo{
         uint8_t bridge_mac[6];    
-    };
+    }bridge;
 };
