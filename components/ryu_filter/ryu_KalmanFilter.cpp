@@ -1,4 +1,6 @@
 #include "ryu_KalmanFilter.hpp"
+#include "ryu_Config.hpp"
+
 
 namespace Filter {
 
@@ -21,9 +23,12 @@ void KalmanFilter::init(float q_gyro, float q_angle, float r_accel, float r_mag)
     R_mag_ = r_mag;
 }
 
-Vector3f KalmanFilter::getEuler() const {
+Attitude_t KalmanFilter::getEuler() const {
     std::lock_guard<std::mutex> lock(mtx_);
-    return estimated_attitude_;
+    return Attitude_t{  estimated_attitude_.x * RAD_TO_DEG,
+                        estimated_attitude_.y * RAD_TO_DEG,
+                        estimated_attitude_.z * RAD_TO_DEG
+                    };
 }
 
 void KalmanFilter::normalizeVector(Vector3f& v) {

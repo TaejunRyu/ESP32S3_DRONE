@@ -16,6 +16,8 @@
 #include "ryu_KalmanFilter.hpp"
 #include "ryu_SensorTask.hpp"
 #include "ryu_espnow.hpp"
+#include "ryu_mavlink.hpp"
+#include "ryu_timer.hpp"
 
 
 namespace Controller {
@@ -65,6 +67,21 @@ void Flight::flight_task(void *pvParameters)
     espnow.initialize();
     espnow.connect_callback();
 
+
+    Service::Timer& timer =  Service::Timer::get_instance();
+    timer.intiallize();
+    
+
+    // mavlink 서비스
+    // 1. TimerService 과 연계됨.
+    // 2. Qgc와 관련되어진 모든 통신담당.
+    Service::Mavlink& mavlink = Service::Mavlink::get_instance();
+    mavlink.initialize();
+    mavlink.start_task();
+    timer.Start();
+
+    
+
     uint32_t loop_cnt = 0;
     int64_t last_time = esp_timer_get_time();    
     ImuData cur_imu_data {};
@@ -88,7 +105,16 @@ void Flight::flight_task(void *pvParameters)
                         cur_imu_data.mag, 
                         dt
                     ); // 내부적으로 mag 보정 프로세스를 자동으로 거침
-        Vector3f EulerDeg = kalman.getEuler() * RAD_TO_DEG;
+        Attitude_t attitude = kalman.getEuler();
+
+        // qgc로 데이터 전송
+        mavlink._attitude.roll  = attitude.roll;
+        mavlink._attitude.pitch = attitude.pitch;
+        mavlink._attitude.yaw   = attitude.yaw;
+        mavlink._attitude.roll_speed    = cur_imu_data.gyro.x * RAD_TO_DEG;
+        mavlink._attitude.pitch_speed   = cur_imu_data.gyro.y * RAD_TO_DEG;
+        mavlink._attitude.yaw_speed     = cur_imu_data.gyro.z * RAD_TO_DEG;
+
 
         //[단계 D] 과도한 UART 병목을 차단하기 위해 50ms(50Hz) 주기로만 각도 출력
         if (++loop_cnt >= 50) { 
@@ -103,9 +129,9 @@ void Flight::flight_task(void *pvParameters)
                     cur_imu_data.mag.x,
                     cur_imu_data.mag.y,
                     cur_imu_data.mag.z,
-                    EulerDeg.x,   // 이제 원복 현상 없이 정교하게 각도가 추종됩니다.
-                    EulerDeg.y,
-                    EulerDeg.z -7.7f,
+                    attitude.roll,   // 이제 원복 현상 없이 정교하게 각도가 추종됩니다.
+                    attitude.pitch,
+                    attitude.yaw -7.7f,
                     dt
                 );
         }            

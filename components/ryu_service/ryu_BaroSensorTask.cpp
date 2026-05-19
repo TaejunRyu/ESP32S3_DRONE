@@ -8,7 +8,6 @@
 #include "ryu_ICM20948.hpp"
 #include "ryu_SharedDataManager.hpp"
 
-static const char* TAG = "SENSOR_TASK";
 
 namespace Service {
 

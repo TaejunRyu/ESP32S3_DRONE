@@ -18,5 +18,6 @@ idf_component_register(
         ryu_util
         ryu_filter
         ryu_service
+        ryu_qgc
     
 )

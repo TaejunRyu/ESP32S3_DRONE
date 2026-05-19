@@ -33,10 +33,10 @@ class SharedDataManager {
         }
 
         // 실제 공유 데이터 저장소
-        ImuData     _shared_imu_data   {};
-        Attitude    _currentAttitude   {};
-        Attitude    _targetAttitude    {}; 
-        BaroData    _shared_baro_data  {};
+        ImuData         _shared_imu_data   {};
+        Attitude_t      _currentAttitude   {};
+        Attitude_t      _targetAttitude    {}; 
+        BaroData        _shared_baro_data  {};
         
         // 데이터 파트별 독립 뮤텍스
         SemaphoreHandle_t _mutex_imu     = nullptr;
@@ -75,15 +75,15 @@ class SharedDataManager {
         }
 
         // --- 2. 현재 자세(Attitude) 데이터 창구 ---
-        void setAttitude(const Attitude& att) {
+        void setAttitude(const Attitude_t& att) {
             if (xSemaphoreTake(_mutex_current, 0) == pdTRUE) {
                 _currentAttitude = att;
                 xSemaphoreGive(_mutex_current);
             }
         }
 
-        Attitude getAttitude() {
-            Attitude temp {};
+        Attitude_t getAttitude() {
+            Attitude_t temp {};
             if (xSemaphoreTake(_mutex_current, 0) == pdTRUE) {
                 temp = _currentAttitude;
                 xSemaphoreGive(_mutex_current);
@@ -93,16 +93,16 @@ class SharedDataManager {
         }
 
         // --- 3. 목표 자세(Target Attitude) 데이터 창구 ---
-        void setTargetAttitude(const Attitude& target) {
+        void setTargetAttitude(const Attitude_t& target) {
             if (xSemaphoreTake(_mutex_target, 0) == pdTRUE) {
                 _targetAttitude = target;
                 xSemaphoreGive(_mutex_target);
             }
         }
 
-        Attitude getTargetAttitude() {
+        Attitude_t getTargetAttitude() {
             if (xSemaphoreTake(_mutex_target, 0) == pdTRUE) {
-                Attitude temp = _targetAttitude;
+                Attitude_t temp = _targetAttitude;
                 xSemaphoreGive(_mutex_target);
                 return temp;
             }

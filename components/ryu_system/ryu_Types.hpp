@@ -151,7 +151,7 @@ struct Vector3{
 
 
 // 2. 오일러 각도 기반 드론 자세 데이터
-struct Attitude {
+struct Attitude_t {
     union{
         float data[3] ={0.0f,};
         struct{
@@ -161,8 +161,18 @@ struct Attitude {
         };
     };
 
-    Attitude() = default;
-    Attitude(float r, float p, float y) : roll(r), pitch(p), yaw(y) {}
+    Attitude_t() = default;
+    Attitude_t(float r, float p, float y) : roll(r), pitch(p), yaw(y) {}
+    constexpr Attitude_t(const Attitude_t&) = default; 
+   // 4. 안전한 대입 연산자 (자기 대입 방어 코드 포함)
+    Attitude_t& operator=(const Attitude_t& other) {
+        if (this != &other) { 
+            roll    = other.roll; 
+            pitch   = other.pitch;
+            yaw     = other.yaw;
+        }
+        return *this;
+    }
 
     void reset() {
         roll = 0.0f;

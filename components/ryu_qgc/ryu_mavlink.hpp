@@ -58,6 +58,8 @@ class Mavlink{
         void MAV_CMD_REQUEST_PROTOCOL_VERSION_func(mavlink_message_t *msg, mavlink_command_long_t cmd);
 
          
+        static void SendtoQgcTask(void * pv);
+        void start_task();
         void on_timer_tick();
         esp_err_t initialize();
         

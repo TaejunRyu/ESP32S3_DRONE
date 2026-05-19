@@ -189,8 +189,8 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
             _ibus->Write(B0_USER_CTRL, 0x02); // I2C_MST_RST (마스터 리셋으로 락 해제)
             vTaskDelay(pdMS_TO_TICKS(5));     // 버스 안정화를 위해 5ms 대기
             _ibus->Write(B0_USER_CTRL, 0x20); // I2C_MST_EN  (마스터 재가동)
-            
             raw.is_mag_updated = false;
+            ESP_LOGW(TAG,"ST2 Overflow... Under Repair...");
             return ESP_FAIL; 
         }
 

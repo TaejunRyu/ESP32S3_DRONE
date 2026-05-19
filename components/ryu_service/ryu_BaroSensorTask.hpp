@@ -14,6 +14,7 @@ namespace Service{
 
 class BaroTask{
     private:
+        static constexpr const char* TAG = "BaroTask";
 
 
 

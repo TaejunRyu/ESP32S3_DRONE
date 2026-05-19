@@ -1,4 +1,4 @@
-#include "ryu_mavlink.h"
+#include "ryu_mavlink.hpp"
 
 #include <cmath>   // float, double용 std::abs
 #include <ranges>
@@ -10,7 +10,7 @@
 #include <esp_timer.h>
 
 #include "ryu_Config.hpp"
-#include "ryu_ParamTable.h"
+#include "ryu_ParamTable.hpp"
 #include "ryu_timer.hpp"
 // #include "ryu_pid.h"
 #include "ryu_espnow.hpp"
@@ -598,7 +598,47 @@ void Mavlink::MAV_CMD_REQUEST_PROTOCOL_VERSION_func(mavlink_message_t *msg, mavl
     send_mavlink_msg(&ack_msg);
 }
 
+void Mavlink::SendtoQgcTask(void *pv)
+{
+    //auto& mavlink =  Service::Mavlink::get_instance();
+    Mavlink *mavlink = static_cast<Mavlink*>(pv);
+    static mavlink_status_t status;
+    mavlink_message_t msg;
+    Service::EspNow::esp_now_data_t pkt;
+    
+    while (true) {
+        if (xQueueReceive(EspNow::get_instance().mavlink_rx_queue, &pkt, portMAX_DELAY)) {                
+            for (int i = 0; i < pkt.len; ++i) {
+                if (mavlink_parse_char(MAVLINK_COMM_2, pkt.buffer[i], &msg, &status)) {
+                    mavlink->handle_mavlink_message(&msg);
+                    // QGC 명령에 따른 상태 업데이트 로직
+                    // static bool previous_armed_state = false;
+                    // if (previous_armed_state != ENV::g_sys.is_armed) {
+                    //     if (ENV::g_sys.is_armed) {
+                    //         ENV::g_heartbeat.base_mode   |= MAV_MODE_FLAG_SAFETY_ARMED;
+                    //         ENV::g_sys.system_status      = MAV_STATE_ACTIVE;
+                    //         // calibrate_ground_pressure(); // 주석 처리 유지: 통신 두절 방지
+                    //         ESP_LOGD(TAG,"시동으로 프래그 변환(시동)");
+                    //     } else {
+                    //         ENV::g_heartbeat.base_mode   &= ~MAV_MODE_FLAG_SAFETY_ARMED;
+                    //         ENV::g_sys.system_status      = MAV_STATE_STANDBY;
+                    //         ESP_LOGD(TAG,"시동으로 프래그 변환(시동 꺼짐)");
+                    //     }
+                    //     previous_armed_state = ENV::g_sys.is_armed; // 중복 코드 제거
+                    //}
+                }
+            }
+        } // if(xQueueReceive(....))
+    } //while(true)
+}
 
+void Mavlink::start_task()
+{
+    auto res = xTaskCreatePinnedToCore(SendtoQgcTask, "SendtoQgcTask", 8192, this, 15,nullptr, 0);
+    if (res != pdPASS) ESP_LOGE(TAG, "❌ 3.SendtoQgcTask Task is failed! code: %d", res);
+    else ESP_LOGI(TAG, "✓ 3.SendtoQgcTask task is passed...");
+    //return res;
+}
 
 void Mavlink::on_timer_tick()
 {
@@ -627,13 +667,13 @@ void Mavlink::on_timer_tick()
             // gps시간이 다르면 복사하고 아니면 이전 데이터 사용
 
             auto& gps = Sensor::Gps::get_instance();
-            if (xSemaphoreTake(gps.xGpsMutex, 0 )== pdTRUE) { 
+         //   if (xSemaphoreTake(gps.xGpsMutex, 0 )== pdTRUE) { 
                 if (gps.share_gps.iTOW != last_itow){
                     m_gps       = gps.share_gps;
                     last_itow   = gps.share_gps.iTOW;         
                     m_gps.last_update_tick = xTaskGetTickCount();      
-                }
-                xSemaphoreGive(gps.xGpsMutex);
+           //     }
+           //     xSemaphoreGive(gps.xGpsMutex);
             }
         }
     }
@@ -771,9 +811,11 @@ esp_err_t Mavlink::initialize()
             .custom_mode = 0x00070000 // PX4 STABILIZE 모드: 0x00070000 (Main Mode 7) + 0x00000000 (Sub Mode 0)
     };
 
+    // 중요........
     // timer의 callback과 연결하여 on_timer_tick를 타이머에의해서 실행함.
-    auto& timer = Service::Timer::get_instance();
+    Service::Timer& timer = Service::Timer::get_instance();
     timer.set_timer_callback([this](){on_timer_tick();});
+
     _initialized = true;
     ESP_LOGI(TAG,"Initialized successfully.");
     return ESP_OK;

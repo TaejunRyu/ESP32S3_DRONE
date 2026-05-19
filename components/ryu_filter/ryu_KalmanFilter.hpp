@@ -24,7 +24,7 @@ public:
     void update(const Vector3f& acc, const Vector3f& gyro_rad, const Vector3f& mag, float dt);
     
     // 내부 추정 라디안 값을 그대로 반환하는 오리지널 함수
-    Vector3f getEuler() const;
+    Attitude_t getEuler() const;
 
 private:
     KalmanFilter();
