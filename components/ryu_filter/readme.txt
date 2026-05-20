@@ -19,6 +19,8 @@
     10) namespace 는 Filter 이다 
     11) #pragma once 사용
     12) 쿼터니언 활용 할것.
+    13) getEuler함수 구현할것.
+    14) 센서 데이터 참조할것.
 
 
 
