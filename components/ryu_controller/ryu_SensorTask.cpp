@@ -6,7 +6,9 @@
 #include "esp_timer.h"
 #include "ryu_Types.hpp"
 #include "ryu_spi.hpp"
+#include "ryu_i2c.hpp"
 #include "ryu_ICM20948.hpp"
+#include "ryu_IST8310.hpp"
 #include "ryu_SharedDataManager.hpp"
 #include "ryu_BusInterface.hpp"
 #include "ryu_KalmanFilter.hpp"
@@ -63,22 +65,34 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
     Driver::SPI& spi = Driver::SPI::get_instance();
     spi.initialize();
 
-    Interface::IBus* bus_interface = Interface::createBIF(spi.get_host(), SPI_CS_PIN);
+    //Driver::I2C& i2c = Driver::I2C::get_instance();
+    //i2c.initialize();
+    
+    Interface::IBus* spi_interface = Interface::createBIF(spi.get_host(), SPI_CS_PIN);
+    //Interface::IBus* i2c_interface = Interface::createBIF(i2c.get_bus_handle(),Sensor::IST8310::ADDR);
+
 
     // 동적 할당 및 NULL 포인터 검증 예외 처리
     task->_icm20948 = new (std::nothrow) Sensor::ICM20948();
     if (task->_icm20948 == nullptr) {
         ESP_LOGE(TAG, "치명적 오류: IMU 메모리 할당 실패! 시스템을 정지합니다.");
-        if (bus_interface != nullptr) {
-            delete bus_interface; 
+        if (spi_interface != nullptr) {
+            delete spi_interface; 
         }
         vTaskDelete(nullptr);
         return;
     }
 
-    task->_icm20948->set_bus(bus_interface);
+    task->_icm20948->set_bus(spi_interface);
     task->_icm20948->initialize();
     task->_icm20948->enable_mag_bypass();
+    task->_icm20948->set_include_mag(true);  // ak09916포함
+
+
+    //task->_ist8310->set_bus(i2c_interface);
+    //task->_ist8310->initialize();
+
+
 
     // 싱글톤 중계 데이터 매니저 포인터 바인딩 완료
     task->_data_manager = &Utils::SharedDataManager::getinstance();
@@ -150,8 +164,11 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
     
     // 자원 해제 레이어
     delete task->_icm20948;
+    //delete task->_ist8310;
     task->_icm20948 = nullptr;
-    delete bus_interface;
+    //task->_ist8310  = nullptr;
+    delete spi_interface;
+    //delete i2c_interface;
     vTaskDelete(nullptr);
 }
 

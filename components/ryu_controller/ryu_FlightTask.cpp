@@ -33,7 +33,7 @@ esp_err_t Flight::deinitialize(){
 void Flight::flight_task(void *pvParameters)
 {
     esp_task_wdt_add(nullptr);
-    Flight* flight = static_cast<Flight*>(pvParameters);
+    //Flight* flight = static_cast<Flight*>(pvParameters);
 
     // 1. 중계자 데이터 매니저 가져오기
     Utils::SharedDataManager& sharedData = Utils::SharedDataManager::getinstance();
@@ -57,6 +57,7 @@ void Flight::flight_task(void *pvParameters)
     espnow.start_task();
     espnow.connect_callback();
 
+
     Service::Timer& timer = Service::Timer::get_instance();
     timer.intiallize();
     timer.Start();
@@ -66,10 +67,7 @@ void Flight::flight_task(void *pvParameters)
     mavlink.start_task();
     
     uint32_t loop_cnt = 0;
-    
-    // 타임스텝 주기 상수 (1kHz 동기화이므로 0.001초 고정)
-    //constexpr float dt = 0.001f; 
-    
+        
     ImuData cur_imu_data {};
     
     ESP_LOGI(TAG, "Flight 제어 태스크가 Core 1에서 완벽한 데이터 동기화 모드로 가동되었습니다.");
@@ -128,15 +126,15 @@ void Flight::flight_task(void *pvParameters)
             // run_pid_control(attitude, cur_imu_data.gyro);
 
             // [출력 가독성 최적화] UART 병목 및 로깅 오버헤드를 막기 위한 50Hz(20ms) 주기 필터링 로그
-            // if (++loop_cnt >= 20) { 
-            //     loop_cnt = 0;
-            //     ESP_LOGI(TAG, "|AX: %8.5f |AY: %8.5f |AZ: %8.5f |GX: %8.5f |GY: %8.5f |GZ: %8.5f |MX: %8.5f |MY: %8.5f |MZ: %8.5f |R: %8.5f |P: %8.5f |Y: %8.5f", 
-            //             cur_imu_data.acc.x,   cur_imu_data.acc.y,   cur_imu_data.acc.z,
-            //             gyro_rad.x,           gyro_rad.y,           gyro_rad.z,
-            //             cur_imu_data.mag.x,   cur_imu_data.mag.y,   cur_imu_data.mag.z,
-            //             attitude.roll,        attitude.pitch,       attitude.yaw
-            //         );
-            // }            
+            if (++loop_cnt >= 20) { 
+                loop_cnt = 0;
+                ESP_LOGI(TAG, "|AX: %8.5f |AY: %8.5f |AZ: %8.5f |GX: %8.5f |GY: %8.5f |GZ: %8.5f |MX: %8.5f |MY: %8.5f |MZ: %8.5f |R: %8.5f |P: %8.5f |Y: %8.5f", 
+                        cur_imu_data.acc.x,   cur_imu_data.acc.y,   cur_imu_data.acc.z,
+                        gyro_rad.x,           gyro_rad.y,           gyro_rad.z,
+                        cur_imu_data.mag.x,   cur_imu_data.mag.y,   cur_imu_data.mag.z,
+                        attitude.roll,        attitude.pitch,       attitude.yaw
+                    );
+            }            
         } else {
             // Failsafe 트리거: 5ms 동안 Core 0로부터 동기화 신호(Notification)가 누락된 상황 예외 처리
             //ESP_LOGW(TAG, "비상: 센서 데이터 동기화 신호 지연 감지!");

@@ -62,6 +62,7 @@ class IST8310  : public Interface::IImuSensor{
         Vector3f _mag_offset ={MAG_OFFSET_X,MAG_OFFSET_Y,MAG_OFFSET_Z};
         Vector3f _mag_scale ={MAG_SCALE_X,MAG_SCALE_Y,MAG_SCALE_Z};
         Vector3f _mag_previous {};
+
         bool _initialized = false;
 };
 

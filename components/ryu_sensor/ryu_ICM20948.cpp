@@ -169,37 +169,39 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
         
         raw.temperature = (float)((int16_t)((d[12] << 8) | d[13])); 
 
-        // 지자계 상태 레지스터 추출
-        uint8_t st1 = d[14]; 
-        uint8_t st2 = d[23]; // ※ 주의: SLV0 설정이 10바이트 읽기여야 올바른 위치입니다.
+        if(_include_mag){
+            // 지자계 상태 레지스터 추출
+            uint8_t st1 = d[14]; 
+            uint8_t st2 = d[23]; // ※ 주의: SLV0 설정이 10바이트 읽기여야 올바른 위치입니다.
 
-        // 1단계 비트 결합: AK09916 리틀 엔디안 결합을 int16_t 정수형으로 명확하게 처리
-        int16_t raw_mag_x = (int16_t)((d[16] << 8) | d[15]);
-        int16_t raw_mag_y = (int16_t)((d[18] << 8) | d[17]);
-        int16_t raw_mag_z = (int16_t)((d[20] << 8) | d[19]);
+            // 1단계 비트 결합: AK09916 리틀 엔디안 결합을 int16_t 정수형으로 명확하게 처리
+            int16_t raw_mag_x = (int16_t)((d[16] << 8) | d[15]);
+            int16_t raw_mag_y = (int16_t)((d[18] << 8) | d[17]);
+            int16_t raw_mag_z = (int16_t)((d[20] << 8) | d[19]);
 
-        // 지자계 최종 스케일 변환 (float 형 대응)
-        raw.mag.x = (float)raw_mag_x * MAG_SCALE; 
-        raw.mag.y = (float)raw_mag_y * MAG_SCALE;
-        raw.mag.z = (float)raw_mag_z * MAG_SCALE;            
+            // 지자계 최종 스케일 변환 (float 형 대응)
+            raw.mag.x = (float)raw_mag_x * MAG_SCALE; 
+            raw.mag.y = (float)raw_mag_y * MAG_SCALE;
+            raw.mag.z = (float)raw_mag_z * MAG_SCALE;            
 
-        // ⚠️ 방어 코드: ST2의 오버플로우(HOFL) 비트가 켜졌거나, 데이터가 모두 완전한 0인 물리적 락 상태 검증
-        if ((st2 & 0x08) || (fabsf(raw.mag.x) < 0.0001f && fabsf(raw.mag.y) < 0.0001f && fabsf(raw.mag.z) < 0.0001f)) {
-            select_bank(0);
-            _ibus->Write(B0_USER_CTRL, 0x02); // I2C_MST_RST (마스터 리셋으로 락 해제)
-            vTaskDelay(pdMS_TO_TICKS(5));     // 버스 안정화를 위해 5ms 대기
-            _ibus->Write(B0_USER_CTRL, 0x20); // I2C_MST_EN  (마스터 재가동)
-            raw.is_mag_updated = false;
-            ESP_LOGW(TAG,"ST2 Overflow... Under Repair...");
-            return ESP_FAIL; 
-        }
+            // ⚠️ 방어 코드: ST2의 오버플로우(HOFL) 비트가 켜졌거나, 데이터가 모두 완전한 0인 물리적 락 상태 검증
+            if ((st2 & 0x08) || (fabsf(raw.mag.x) < 0.0001f && fabsf(raw.mag.y) < 0.0001f && fabsf(raw.mag.z) < 0.0001f)) {
+                select_bank(0);
+                _ibus->Write(B0_USER_CTRL, 0x02); // I2C_MST_RST (마스터 리셋으로 락 해제)
+                vTaskDelay(pdMS_TO_TICKS(5));     // 버스 안정화를 위해 5ms 대기
+                _ibus->Write(B0_USER_CTRL, 0x20); // I2C_MST_EN  (마스터 재가동)
+                raw.is_mag_updated = false;
+                ESP_LOGW(TAG,"ST2 Overflow... Under Repair...");
+                return ESP_FAIL; 
+            }
 
-        // 지자계 데이터 정상 갱신 검사 (Data Ready)
-        if (st1 & 0x01) {
-            raw.is_mag_updated = true;
-            raw.mag_timestamp = raw.timestamp;
-        } else { 
-            raw.is_mag_updated = false;
+            // 지자계 데이터 정상 갱신 검사 (Data Ready)
+            if (st1 & 0x01) {
+                raw.is_mag_updated = true;
+                raw.mag_timestamp = raw.timestamp;
+            } else { 
+                raw.is_mag_updated = false;
+            }
         }
     }
     return err;
@@ -221,8 +223,6 @@ void ICM20948::apply_filter(ImuData &io_data){
     io_data.acc  = _last_filtered_accel;
     io_data.gyro = _last_filtered_gyro;
 }
-
-
 
 
 void ICM20948::calibration_mag_hard_iron()
@@ -331,17 +331,18 @@ esp_err_t ICM20948::updateSample(ImuData& sample){
         sample.temperature = data.temperature;
         sample.timestamp   = data.timestamp;
 
-        if (data.is_mag_updated){
-            sample.mag    = (data.mag -_mag_offset) * _mag_scale;
-            sample.mag_timestamp  = data.mag_timestamp;
-            sample.is_mag_updated = data.is_mag_updated;
-            _mag_previous =sample.mag;   //정상으로 읽었을때 자료 보관.
- 
-        }else{
-            sample.is_mag_updated = false;
-            sample.mag = _mag_previous; // 읽지 못하였을경우 이전값으로....
-        }     
-       
+        if (_include_mag){
+            if (data.is_mag_updated){
+                sample.mag    = (data.mag -_mag_offset) * _mag_scale;
+                sample.mag_timestamp  = data.mag_timestamp;
+                sample.is_mag_updated = data.is_mag_updated;
+                _mag_previous =sample.mag;   //정상으로 읽었을때 자료 보관.
+    
+            }else{
+                sample.is_mag_updated = false;
+                sample.mag = _mag_previous; // 읽지 못하였을경우 이전값으로....
+            }     
+        }
     }
     return err;
 }

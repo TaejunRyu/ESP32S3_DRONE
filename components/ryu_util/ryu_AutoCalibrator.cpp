@@ -50,7 +50,7 @@ SensorRotation AutoCalibrator::detect_orientation(const Vector3f &raw_acc_sample
     }
 
     // 판별 실패 시 예외 처리 기본값 반환
-    ESP_LOGW(AUTO_CAL_TAG, "방향 식별 불가능 (흔들림 유입), 기본 정방향(ROTATION_NONE)으로 고정합니다.");
+    ESP_LOGW(TAG, "방향 식별 불가능 (흔들림 유입), 기본 정방향(ROTATION_NONE)으로 고정합니다.");
     return SensorRotation::ROTATION_NONE;
 }
 

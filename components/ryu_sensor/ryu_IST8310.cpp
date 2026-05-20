@@ -175,14 +175,16 @@ esp_err_t IST8310::read_with_offset(Vector3f data)
 {
     Vector3f raw{};
     auto err = this->read_data(raw);
+
     raw = (raw - _mag_offset) * _mag_scale;
     raw.normalize();    
-
     // X를 (-)부호를 해야지 Mahony를 통과
     raw.x *=  -1.0f;
     data =raw;
     return err;
 }
+
+
 
 void IST8310::calibrate_hard_iron()
 {

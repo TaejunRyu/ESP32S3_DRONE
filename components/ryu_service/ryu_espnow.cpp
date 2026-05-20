@@ -77,8 +77,8 @@ esp_err_t EspNow::initialize()
 }
 
 
-void EspNow::on_esp_now_recv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len)
-{
+void EspNow::on_esp_now_recv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len){
+
 if (len <= 0 || data == nullptr || recv_info == nullptr) return;
 
     auto& espnow = Service::EspNow::get_instance();
@@ -207,15 +207,6 @@ void EspNow::mavlink_tx_task(void *pvParameters)
     while (true) {
         // 큐에서 데이터 대기 (데이터가 올 때까지 Blocked 상태로 CPU 점유 0)
         if (xQueueReceive(espnow->mavlink_tx_queue, &tx_pkt, portMAX_DELAY) == pdPASS) {
-            // 2. 정상 전송
-            // ESP_OK : succeed - 
-            // ESP_ERR_ESPNOW_NOT_INIT : ESPNOW is not initialized - 
-            // ESP_ERR_ESPNOW_ARG : invalid argument - 
-            // ESP_ERR_ESPNOW_INTERNAL : internal error - 
-            // ESP_ERR_ESPNOW_NO_MEM : out of memory, when this happens, you can delay a while before sending the next data - 
-            // ESP_ERR_ESPNOW_NOT_FOUND : peer is not found - 
-            // ESP_ERR_ESPNOW_IF : current Wi-Fi interface doesn't match that of peer - 
-            // ESP_ERR_ESPNOW_CHAN: current Wi-Fi channel doesn't match that of peer
             esp_err_t result = esp_now_send(espnow->bridge_mac, tx_pkt.buffer, tx_pkt.len);
             if(result == ESP_ERR_ESPNOW_NO_MEM){
                 // 버퍼가 찰 때까지 너무 빨리 보낸 것이므로 잠시 쉬어줍니다.
