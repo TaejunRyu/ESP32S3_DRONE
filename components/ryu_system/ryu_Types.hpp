@@ -20,8 +20,6 @@ namespace Utils{
 }
 
 
-
-
 // 1. 센서 3축 데이터 (가속도, 자이로 공용)
 struct Vector3f {
     union {
@@ -173,6 +171,9 @@ struct Attitude_t {
         }
         return *this;
     }
+    Attitude_t operator*(float scalar) const {
+        return Attitude_t(roll * scalar, pitch * scalar, yaw * scalar);
+    }
 
     void reset() {
         roll = 0.0f;
@@ -208,8 +209,6 @@ struct BaroData {
     float temperature;
     bool is_updated;
 };
-
-
 
 
 /**

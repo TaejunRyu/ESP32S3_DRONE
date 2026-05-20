@@ -31,10 +31,9 @@ void BaroTask::ReadBaroTask(void* pvParameters) {
         // if (task->_baro_sensor->read_pressure_and_calc_alt(baro_buf) == ESP_OK) {
         //     baro_buf.timestamp = esp_timer_get_time();
             
-        //     // [단계 4] 데이터 매니저에 안전하게 주입
-        //     task->_data_manager->update_latest_baro(baro_buf);
-        // }
-
+            // [단계 4] 데이터 매니저에 안전하게 주입
+            Utils::SharedDataManager::getinstance().update_latest_baro(baro_buf);
+        //}
         // 정확히 20ms 주기를 맞추기 위해 잔여 시간 휴식
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }

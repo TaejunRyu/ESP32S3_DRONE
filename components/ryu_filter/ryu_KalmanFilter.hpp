@@ -1,178 +1,86 @@
-#include "ryu_KalmanFilter.hpp"
+#pragma once
+
+#include "ryu_Types.hpp"
+#include <cmath>
+#include <mutex>
 
 namespace Filter {
 
-KalmanFilter::KalmanFilter() {
-    init();
-}
-
-void KalmanFilter::init(float q0, float q1, float q2, float q3) {
-    q[0] = q0; q[1] = q1; q[2] = q2; q[3] = q3;
-    normalizeQuaternion();
-
-    // 초기 행렬 상태를 안전 지대로 완전 명시 초기화
-    for (int i = 0; i < 16; i++) {
-        P_data[i] = (i % 5 == 0) ? 0.5f : 0.0f;
-        Q_data[i] = (i % 5 == 0) ? 0.005f : 0.0f; // 자이로 민감도 표준 튜닝
+class KalmanFilter {
+public:
+    static KalmanFilter& getInstance() {
+        static KalmanFilter instance;
+        return instance;
     }
-    
-    R_acc = 0.02f;   // 가속도(Roll/Pitch) 보정 가중치
-    R_mag = 0.15f;   // 지자계(Yaw) 가중치를 상향하여 정지 상태 5도 요동 및 Roll 간섭 완벽 격리
-}
 
-void KalmanFilter::update(const Vector3f& acc, const Vector3f& gyro, const Vector3f& mag, float dt) {
-    if (dt <= 0.0001f || std::isnan(dt)) dt = 0.001f;
-    predict(gyro, dt);
-    updateCorrect(acc, mag);
-}
+    void init(float initRoll = 0.0f, float initPitch = 0.0f, float initYaw = 0.0f);
 
-void KalmanFilter::predict(const Vector3f& gyro, float dt) {
-    float gx = gyro.x;
-    float gy = gyro.y;
-    float gz = gyro.z; 
-
-    float q0_old = q[0], q1_old = q[1], q2_old = q[2], q3_old = q[3];
-    
-    float n_q0 = q0_old + 0.5f * (-q1_old * gx - q2_old * gy - q3_old * gz) * dt;
-    float n_q1 = q1_old + 0.5f * ( q0_old * gx + q2_old * gz - q3_old * gy) * dt;
-    float n_q2 = q2_old + 0.5f * ( q0_old * gy - q1_old * gz + q3_old * gx) * dt;
-    float n_q3 = q3_old + 0.5f * ( q0_old * gz + q1_old * gy - q2_old * gx) * dt;
-
-    q[0] = n_q0; q[1] = n_q1; q[2] = n_q2; q[3] = n_q3;
-    normalizeQuaternion();
-
-    float F_data[16] = {
-        1.0f,         -0.5f*gx*dt,  -0.5f*gy*dt,  -0.5f*gz*dt,
-         0.5f*gx*dt,   1.0f,         0.5f*gz*dt,  -0.5f*gy*dt,
-         0.5f*gy*dt,  -0.5f*gz*dt,   1.0f,         0.5f*gx*dt,
-         0.5f*gz*dt,   0.5f*gy*dt,  -0.5f*gx*dt,   1.0f
+    void update(const Vector3f& accel,const Vector3f& gyro, const Vector3f& mag,float dt){
+        predict(gyro,dt);
+        update(accel,mag);
     };
 
-    float FT_data[16];
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) { 
-            FT_data[i * 4 + j] = F_data[j * 4 + i]; 
-        }
-    }
-
-    float local_P[16]; 
-    float local_Q[16];
-    for(int i = 0; i < 16; i++) { 
-        local_P[i] = P_data[i]; 
-        local_Q[i] = Q_data[i]; 
-    }
-
-    float FP_data[16]; 
-    float FPF_data[16];
-
-    dspm_mult_4x4x4_f32(F_data, local_P, FP_data);
-    dspm_mult_4x4x4_f32(FP_data, FT_data, FPF_data);
-
-    for (int i = 0; i < 16; i++) {
-        P_data[i] = FPF_data[i] + local_Q[i];
-    }
-}
-
-void KalmanFilter::updateCorrect(const Vector3f& acc, const Vector3f& mag) {
-    float norm_a = std::sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
-    if (norm_a < 0.001f) return;
-    float ax = acc.x / norm_a; float ay = acc.y / norm_a; float az = acc.z / norm_a;
-
-    float norm_m = std::sqrt(mag.x * mag.x + mag.y * mag.y + mag.z * mag.z);
-    if (norm_m < 0.001f) return;
-    float mx = mag.x / norm_m; float my = mag.y / norm_m; float mz = mag.z / norm_m;
-
-    float q0 = q[0], q1 = q[1], q2 = q[2], q3 = q[3];
-
-    float vx = 2.0f * (q1*q3 - q0*q2);
-    float vy = 2.0f * (q0*q1 + q2*q3);
-    float vz = q0*q0 - q1*q1 - q2*q2 + q3*q3;
-
-    float hx = mx * (q0*q0 + q1*q1 - q2*q2 - q3*q3) + 2.0f*my*(q1*q2 - q0*q3) + 2.0f*mz*(q1*q3 + q0*q2);
-    float hy = 2.0f*mx*(q1*q2 + q0*q3) + my*(q0*q0 - q1*q1 + q2*q2 - q3*q3) + 2.0f*mz*(q2*q3 - q0*q1);
-    float bx = std::sqrt(hx*hx + hy*hy);
-    float bz = 2.0f*mx*(q1*q3 - q0*q2) + 2.0f*my*(q2*q3 + q0*q1) + mz*(q0*q0 - q1*q1 - q2*q2 + q3*q3);
-
-    float wx = 2.0f * bx * (0.5f - q2*q2 - q3*q3) + 2.0f * bz * (q1*q3 - q0*q2);
-    float wy = 2.0f * bx * (q1*q2 - q0*q3) + 2.0f * bz * (0.5f - q0*q1 + q2*q3);
-    float wz = 2.0f * bx * (q0*q2 + q1*q3) + 2.0f * bz * (0.5f - q1*q1 - q2*q2);
-
-    float ex_acc = (ay * vz - az * vy);
-    float ey_acc = (az * vx - ax * vz);
-    float ez_acc = (ax * vy - ay * vx);
-
-    float ex_mag = (my * wz - mz * wy);
-    float ey_mag = (mz * wx - mx * wz);
-    float ez_mag = (mx * wy - my * wx);
-
-    float ex = ex_acc * (1.0f / this->R_acc) + ex_mag * (1.0f / this->R_mag);
-    float ey = ey_acc * (1.0f / this->R_acc) + ey_mag * (1.0f / this->R_mag);
-    float ez = ez_acc * (1.0f / this->R_acc) + ez_mag * (1.0f / this->R_mag);
-
-    // 🛠️ 안전 교정: 대각 성분 인덱스를 완전 수작업 명시하여 루프 오염 원천 해결
-    float K_gain = (P_data[0] + P_data[5] + P_data[10] + P_data[15]) * 0.25f;
-    if (K_gain < 0.05f) K_gain = 0.05f;  
-    if (K_gain > 0.4f)  K_gain = 0.4f; // 상한 안전 한계 마감
-
-    q[0] += (-q1*ex - q2*ey - q3*ez) * K_gain;
-    q[1] += ( q0*ex + q2*ez - q3*ey) * K_gain;
-    q[2] += ( q0*ey - q1*ez + q3*ex) * K_gain;
-    q[3] += ( q0*ez + q1*ey - q2*ex) * K_gain;
-
-    normalizeQuaternion();
-
-    // 🛠️ 대각선 행렬 업데이트를 루프 없이 하드코딩하여 링커 인덱싱 버그 전면 차단
-    float d_gain = (1.0f - K_gain * 0.05f);
-    P_data[0] *= d_gain;  P_data[5] *= d_gain;  P_data[10] *= d_gain; P_data[15] *= d_gain;
+    void predict(const Vector3f& gyro, float dt);
+    void update(const Vector3f& accel, const Vector3f& mag);
     
-    // 오차 하한선 재정렬
-    if (P_data[0] < 0.01f)  P_data[0] = 0.01f;
-    if (P_data[5] < 0.01f)  P_data[5] = 0.01f;
-    if (P_data[10] < 0.01f) P_data[10] = 0.01f;
-    if (P_data[15] < 0.01f) P_data[15] = 0.01f;
+    Attitude_t getEuler() const;
 
-    // 비대각 감쇄 안정화
-    P_data[1] *= 0.95f;  P_data[2] *= 0.95f;  P_data[3] *= 0.95f;
-    P_data[4] *= 0.95f;  P_data[6] *= 0.95f;  P_data[7] *= 0.95f;
-    P_data[8] *= 0.95f;  P_data[9] *= 0.95f;  P_data[11] *= 0.95f;
-    P_data[12] *= 0.95f; P_data[13] *= 0.95f; P_data[14] *= 0.95f;
-}
+    float getXErr(){return x_err;};
+    float getYErr(){return y_err;};
+    float getZErr(){return z_err;};
 
-void KalmanFilter::normalizeQuaternion() {
-    float norm = std::sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]);
-    if (norm < 0.0001f || std::isnan(norm)) {
-        q[0] = 1.0f; q[1] = 0.0f; q[2] = 0.0f; q[3] = 0.0f;
-    } else {
-        q[0] /= norm; q[1] /= norm; q[2] /= norm; q[3] /= norm;
-    }
-}
+private:
+    KalmanFilter();
+    ~KalmanFilter() = default;
+    KalmanFilter(const KalmanFilter&) = delete;
+    KalmanFilter& operator=(const KalmanFilter&) = delete;
 
-Attitude_t KalmanFilter::getEuler() const {
-    Attitude_t euler;
-    const float q0 = q[0];
-    const float q1 = q[1];
-    const float q2 = q[2];
-    const float q3 = q[3];
+    mutable std::mutex mtx;
 
-    euler.roll = std::atan2(2.0f * (q0 * q1 + q2 * q3), 1.0f - 2.0f * (q1 * q1 + q2 * q2));
-    
-    float sinp = 2.0f * (q0 * q2 - q3 * q1);
-    if (sinp > 0.999f)       euler.pitch = 1.570795f;
-    else if (sinp < -0.999f) euler.pitch = -1.570795f;
-    else                    euler.pitch = std::asin(sinp);
+    float q[4];
+    float P[4][4];
 
-    euler.yaw = -std::atan2(2.0f * (q0 * q3 + q1 * q2), 1.0f - 2.0f * (q2 * q2 + q3 * q3));
 
-    euler.roll  *= (180.0f / 3.14159265f);
-    euler.pitch *= (180.0f / 3.14159265f);
-    euler.yaw   *= (180.0f / 3.14159265f);
+    ImuData  _imudata{};
 
-    euler.yaw += -7.70000f;
+    // 100% 정상 작동하는 올바른 참조 방식입니다. (대문자 P 적용)
+    // 쉽게 보는 법: 기체가 정지해 있을 때 P[1][1], P[2][2], P[3][3]의 값이 너무 커지지 않고 작은 값(예: 0.01 이하)으로 안정적으로 유지되고 있다면, 
+    // 자이로의 누적 오차가 가속도계와 지자계에 의해 완벽하게 억제되고 있다는 뜻입니다.
+    float& x_err = P[1][1]; // 쿼터니언 q1 (X축 회전 관여)의 추정 오차 성분
+    float& y_err = P[2][2]; // 쿼터니언 q2 (Y축 회전 관여)의 추정 오차 성분
+    float& z_err = P[3][3]; // 쿼터니언 q3 (Z축 회전 관여)의 추정 오차 성분
 
-    while (euler.yaw < 0.0f)   euler.yaw += 360.0f;
-    while (euler.yaw >= 360.0f) euler.yaw -= 360.0f;
+    // 파라미터는 확장 칼만 필터(EKF)가 센서 데이터를 신뢰하는 비율을 결정하는 핵심 가중치(공분산 파라미터)입니다.
+    // 필터는 기본적으로 자이로스코프를 이용해 자세를 먼저 예측(Predict)하고, 가속도계와 지자계를 이용해 그 예측치의 오차를 보정(Update)합니다. 
+    // 이때 "자이로의 예측 값을 더 믿을 것인가, 아니면 가속도계/지자계의 측정 값을 더 믿을 것인가"를 수학적으로 조율하는 저울 역할을 합니다.
+    // Q_gyro = 0.001f; (시스템/프로세스 노이즈 공분산)의미: 
+    //      필터 내부의 수학적 예측 모델(자이로스코프 데이터)이 가진 자체적인 오차와 불확실성을 뜻합니다.
+    //      비행 시 영향: 이 값을 크게 잡으면 필터는 "자이로 센서 데이터에 노이즈나 누적 오차(Drift)가 많다"고 판단합니다. 
+    //      따라서 자이로를 기반으로 한 빠른 추적을 덜 신뢰하고, 가속도계와 지자계의 보정 기여도를 강제로 높이게 됩니다. 
+    //      반대로 너무 작게 잡으면 가속도계 보정을 무시하고 자이로만 믿다가 수십 초 뒤 자세가 천천히 흐르는 드리프트가 발생합니다. 
+    //      현재 설정하신 0.001f는 매우 적절한 표준값입니다.
+    // R_accel = 0.10f; (가속도계 측정 노이즈 공분산)의미: 
+    //      외부 가속도계 센서가 측정해오는 데이터의 노이즈(불신도)를 뜻합니다.
+    //      비행 시 영향: 이 값이 커질수록 필터는 가속도계 데이터를 덜 신뢰합니다.
+    //      주석에 적어두신 것처럼 모터가 돌 때 진동 때문에 QGC 인공수평선이 떨린다면 이 값을 올리는 것이 정답입니다. 
+    //      값을 올리면 필터가 고주파 진동 노이즈를 "믿지 못할 쓰레기 데이터"로 취급하여 무시하므로 인공수평선이 아주 부드러워집니다.단, 
+    //      이 값을 너무 크게 올리면(예: 1.0f 이상) 기체가 실제로 기울어졌을 때 수평을 다시 잡아주는 보정 속도가 느려져 자세가 일시적으로 흐려질 수 있습니다. 
+    //      주석의 0.05f ~ 0.10f 범위 내에서 진동이 멈추는 최소한의 값을 찾는 것이 가장 좋습니다.
+    // R_mag = 0.05f; (지자계 측정 노이즈 공분산)의미: 
+    //      나침반(지자계) 센서가 읽어오는 데이터의 노이즈(불신도)를 뜻합니다.
+    //      비행 시 영향: 이 값이 커질수록 필터는 나침반 데이터를 덜 신뢰합니다.
+    //      드론은 모터에 강한 전류가 흐를 때 순간적으로 주변 자기장이 왜곡(하드아이언 전자기 간섭)되는 특성이 있습니다.
+    //      만약 평소에는 정북을 잘 보다가, 
+    //      모터 출력을 올릴 때마다 나침반(Yaw)이 미세하게 좌우로 틀어지는 현상이 발생한다면 이 R_mag 값을 0.10f ~ 0.20f 정도로 조금 높여서 
+    //      지자계 왜곡 노이즈를 필터링해 주어야 기체가 요동치지 않고 똑바로 날아갑니다.
+    float Q_gyro;
+    float R_accel;
+    float R_mag;
 
-    return euler;
-}
+    void normalizeQuaternion();
+
+    // [수정] 2차원 배열 참조 형식으로 명확히 타입 정의하여 컴파일 에러 차단
+    void matrixInversion3x3(const float in[3][3], float out[3][3]);
+};
 
 } // namespace Filter

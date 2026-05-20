@@ -2,8 +2,6 @@
 
 #include <esp_timer.h>
 #include <esp_log.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include <esp_task_wdt.h>
 
 #include "ryu_spi.hpp"
@@ -20,6 +18,9 @@
 #include "ryu_timer.hpp"
 
 namespace Controller {
+Flight::Flight() : _taskHandle(nullptr)
+{
+}
 
 esp_err_t Flight::initialize(){
     return ESP_OK;
@@ -34,6 +35,10 @@ void Flight::flight_task(void *pvParameters)
     esp_task_wdt_add(nullptr);
     Flight* flight = static_cast<Flight*>(pvParameters);
 
+    // 1. 중계자 데이터 매니저 가져오기
+    Utils::SharedDataManager& sharedData = Utils::SharedDataManager::getinstance();
+
+    // 2. Core 0에서 구동될 센서 수집 태스크 가동
     Service::SensorTask* sensorTask = new (std::nothrow) Service::SensorTask();
     if (sensorTask == nullptr) {
         ESP_LOGE(TAG, "치명적 오류: SensorTask 인스턴스 생성 실패!");
@@ -42,9 +47,11 @@ void Flight::flight_task(void *pvParameters)
     }
     sensorTask->StartTask();
 
-    Utils::SharedDataManager& sharedData = Utils::SharedDataManager::getinstance();
+    // 3. 칼만 필터 코어 초기화 (NED 기준)
     Filter::KalmanFilter& kalman = Filter::KalmanFilter::getInstance();
-  
+    kalman.init(0.0f, 0.0f, 0.0f);
+
+    // 4. 기타 비행 통신 및 타이머 서비스 가동
     Service::EspNow& espnow = Service::EspNow::get_instance();
     espnow.initialize();
     espnow.start_task();
@@ -59,83 +66,79 @@ void Flight::flight_task(void *pvParameters)
     mavlink.start_task();
     
     uint32_t loop_cnt = 0;
-    int64_t last_time = esp_timer_get_time();    
-    int64_t loop_start_time = last_time; // 초정밀 주기 제어를 위한 기준 시간 변수 추가
+    
+    // 타임스텝 주기 상수 (1kHz 동기화이므로 0.001초 고정)
+    //constexpr float dt = 0.001f; 
+    
     ImuData cur_imu_data {};
     
-    ESP_LOGI(TAG, "Flight 제어 태스크가 Core 1에서 가동되었습니다.");
+    ESP_LOGI(TAG, "Flight 제어 태스크가 Core 1에서 완벽한 데이터 동기화 모드로 가동되었습니다.");
     
     while (true) {
-        // [단계 B] 시간 변화량(dt) 초정밀 계산 (초 단위 변환)
-        int64_t current_time = esp_timer_get_time();
-        float dt = static_cast<float>(current_time - last_time) / 1'000'000.0f;
-        last_time = current_time;
+        // [초고속 저지연 파이프라인] Core 0의 센서 태스크가 매니저에 데이터를 쓰고 신호를 줄 때까지 대기
+        // 1ms 주기로 신호가 인입되므로, 센서 차단 등 비상시 탈출을 위해 타임아웃 마진을 5ms로 설정
+        uint32_t notification_value = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
         
-        loop_start_time = current_time; // 루프가 시작된 절대 시점 확보
-        
-        esp_task_wdt_reset(); 
+        if (notification_value > 0){
+            esp_task_wdt_reset(); 
 
-        // [단계 A] Core 0이 수집한 IMU 데이터 안전 복사
-        sharedData.get_latest_imu(cur_imu_data);
-        
-        // 센서 캘리브레이션 완료 대기
-        if (!sharedData.is_imu_calibrated()) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-            last_time = esp_timer_get_time(); // 대기하는 동안 벌어진 dt 오차 누적 방지
-            continue; 
-        }
-
-        // 축 매핑 및 스케일 팩터 동기화 업데이트 진행
-        kalman.update(cur_imu_data.acc, 
-                      cur_imu_data.gyro * DEG_TO_RAD, 
-                      cur_imu_data.mag, dt);
-                      
-        Attitude_t attitude = kalman.getEuler();
-
-        // QGC 및 Mavlink 데이터 버퍼 전송
-        mavlink._attitude.roll  = attitude.roll;
-        mavlink._attitude.pitch = attitude.pitch;
-        mavlink._attitude.yaw   = attitude.yaw;
-        mavlink._attitude.roll_speed  = cur_imu_data.gyro.x * RAD_TO_DEG;
-        mavlink._attitude.pitch_speed = cur_imu_data.gyro.y * RAD_TO_DEG;
-        mavlink._attitude.yaw_speed   = cur_imu_data.gyro.z * RAD_TO_DEG;
-
-        // [단계 D] UART 병목 방지용 50Hz 주기 출력 루프
-        if (++loop_cnt >= 50) { 
-            loop_cnt = 0;
-            ESP_LOGI(TAG, "|AX: %8.5f |AY: %8.5f |AZ: %8.5f |GX: %8.5f |GY: %8.5f |GZ: %8.5f |MX: %8.5f |MY: %8.5f |MZ: %8.5f |R: %8.5f |P: %8.5f |Y: %8.5f  dt: %5.4f", 
-                    cur_imu_data.acc.x,
-                    cur_imu_data.acc.y,
-                    cur_imu_data.acc.z,
-                    cur_imu_data.gyro.x * DEG_TO_RAD,
-                    cur_imu_data.gyro.y * DEG_TO_RAD,
-                    cur_imu_data.gyro.z * DEG_TO_RAD,
-                    cur_imu_data.mag.x,
-                    cur_imu_data.mag.y,
-                    cur_imu_data.mag.z,
-                    attitude.roll,   
-                    attitude.pitch,
-                    attitude.yaw, // 내부 수식에서 -7.7f가 이미 처리되었으므로 중복 제거 완료
-                    dt
-                );
-        }            
-
-        // TODO: PID 제어 연산 및 모터 출력 바인딩 공간
-
-        // [단계 E] 초정밀 주기 제어 + 워치독 방어 구조 최적화
-        int64_t wake_time = esp_timer_get_time();
-        int64_t elapsed = wake_time - loop_start_time;
-        
-        // 여유 시간이 200us 이상 많이 남았을 때만 IDLE 릴리즈 수행
-        if (LOOP_TIME - elapsed > 200) {
-            vTaskDelay(pdMS_TO_TICKS(1)); 
-        }
-
-        // 1ms 미만의 미세 잔여 지터는 정확한 루프 시작 시점 기준(loop_start_time)으로 폴링 마감
-        while (true) {
-            if (esp_timer_get_time() - loop_start_time >= LOOP_TIME) {
-                break; 
+            // 센서 캘리브레이션(0점 조절)이 완료될 때까지는 필터 연산을 유보하고 대기
+            if (!sharedData.is_imu_calibrated()) {
+                vTaskDelay(pdMS_TO_TICKS(1)); 
+                continue; 
             }
+
+            // [중계자 활용] 뮤텍스 락 없이 원자적으로 0마이크로초 만에 최신 IMU 데이터 복사
+            sharedData.get_latest_imu(cur_imu_data);
+            
+            // 입력 데이터 가공 (입력이 도/초 단위일 경우 예측부 라디안 스케일링 일치 처리)
+            Vector3f gyro_rad = cur_imu_data.gyro * DEG_TO_RAD;
+
+            // [EKF 핵심 엔진 가동] 자이로 예측 후 가속도/지자계 순차 보정 처리
+            kalman.predict(gyro_rad, dt);
+            kalman.update(cur_imu_data.acc, cur_imu_data.mag);
+                        
+            // 진북 기준 최종 오일러 각 추출 (라디안 단위)
+            Attitude_t attitude = kalman.getEuler();
+
+            // 제어 및 외부 송신을 위해 도(Degree) 단위로 변환
+            attitude = attitude * RAD_TO_DEG;
+            
+            // [지리적 편각 보정] 진북에서 -7.7도 지점에 자북이 존재하므로 편각을 보정하여 진북 정렬
+            constexpr float TARGET_TRUE_NORTH = -7.7f; 
+            attitude.yaw = attitude.yaw + TARGET_TRUE_NORTH;
+            
+            // Yaw 각도 범위를 0~360도로 정규화 바인딩
+            if (attitude.yaw < 0.0f)           attitude.yaw += 360.0f;
+            else if (attitude.yaw >= 360.0f)   attitude.yaw -= 360.0f;
+
+            // [중계자 복귀] 최종 수렴된 현재 수평 자세를 데이터 매니저에 즉시 업데이트
+            sharedData.setAttitude(attitude);
+
+            // QGC 모니터링 전용 Mavlink 버퍼 구조체 데이터 밀어넣기
+            mavlink._attitude.roll        = attitude.roll;
+            mavlink._attitude.pitch       = attitude.pitch;
+            mavlink._attitude.yaw         = attitude.yaw;
+            mavlink._attitude.roll_speed  = cur_imu_data.gyro.x;
+            mavlink._attitude.pitch_speed = cur_imu_data.gyro.y;
+            mavlink._attitude.yaw_speed   = cur_imu_data.gyro.z;
+
+            // 여기에 추후 PID 제어 루프를 탑재하시면 됩니다.
+            // run_pid_control(attitude, cur_imu_data.gyro);
+
+            // [출력 가독성 최적화] UART 병목 및 로깅 오버헤드를 막기 위한 50Hz(20ms) 주기 필터링 로그
+            if (++loop_cnt >= 20) { 
+                loop_cnt = 0;
+                ESP_LOGI(TAG, "|AX: %8.5f |AY: %8.5f |AZ: %8.5f |GX: %8.5f |GY: %8.5f |GZ: %8.5f |MX: %8.5f |MY: %8.5f |MZ: %8.5f |R: %8.5f |P: %8.5f |Y: %8.5f", 
+                        cur_imu_data.acc.x,   cur_imu_data.acc.y,   cur_imu_data.acc.z,
+                        gyro_rad.x,           gyro_rad.y,           gyro_rad.z,
+                        cur_imu_data.mag.x,   cur_imu_data.mag.y,   cur_imu_data.mag.z,
+                        attitude.roll,        attitude.pitch,       attitude.yaw
+                    );
+            }            
+        } else {
+            // Failsafe 트리거: 5ms 동안 Core 0로부터 동기화 신호(Notification)가 누락된 상황 예외 처리
+            //ESP_LOGW(TAG, "비상: 센서 데이터 동기화 신호 지연 감지!");
         }
     }
 
@@ -145,15 +148,19 @@ void Flight::flight_task(void *pvParameters)
 
 void Flight::start_task()
 {
+    // 최상위 우선순위(configMAX_PRIORITIES - 1)로 가용한 최고 권력을 할당하여 Core 1에 전적 격리 구동
     xTaskCreatePinnedToCore(
         flight_task,                
         "flight_task",              
         8192, 
         this,                       
         configMAX_PRIORITIES - 1,   
-        nullptr,                    
+        &_taskHandle,                    
         1 
     );
+
+    // [아키텍처 완성] 태스크가 정상 생성되자마자 중계자(SharedDataManager)에 내 핸들을 곧바로 중앙 등록
+    Utils::SharedDataManager::getinstance().register_flight_task_handle(_taskHandle);
 }
 
 } // namespace Controller

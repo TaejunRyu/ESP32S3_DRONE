@@ -14,20 +14,35 @@
 #pragma once
 
 #include <esp_err.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 namespace Controller{
 
+
 class Flight{
-    private:
-        static constexpr const char* TAG = "Flight";
+    
+
+
+    static constexpr const char* TAG = "Flight";
+
     public:
-        Flight()=default;
+        static Flight& getInstance() {
+            static Flight instance;
+            return instance;
+        }
+        Flight();
         ~Flight() = default;
+        Flight(const Flight&) = delete;
+        Flight& operator=(const Flight&) = delete;
+
         esp_err_t initialize();
         esp_err_t deinitialize();
         static void flight_task(void* pvParameters);
+        TaskHandle_t getTaskHandle(){return _taskHandle;};
         void start_task();
     private:
+        TaskHandle_t _taskHandle;
         bool _initialized = false;
 };
 

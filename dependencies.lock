@@ -27,6 +27,6 @@ direct_dependencies:
 - espressif/esp-dsp
 - espressif/mavlink
 - idf
-manifest_hash: 2d6cb2a27de07c8abdf54e45b19cede91d78b1559c026f398c76c1857765877c
+manifest_hash: f7e00d9afb44bacd22e42780110708ae4ff81c61d829d2231f30e84410003e5f
 target: esp32s3
 version: 3.0.0
