@@ -41,7 +41,7 @@ class SharedDataManager {
         ~SharedDataManager() = default; // 뮤텍스가 없으므로 해제 자원도 없음 (메모리 절약)
 
         // 실제 공유 데이터 저장소 (멀티코어 다이렉트 복사용 캐시)
-        SensorData         _shared_imu_data   {};
+        SensorData      _shared_imu_data   {};
         Attitude_t      _currentAttitude   {};
         Attitude_t      _targetAttitude    {}; 
         BaroData        _shared_baro_data  {};
@@ -62,20 +62,6 @@ class SharedDataManager {
         SharedDataManager& operator=(SharedDataManager&&) = delete;
 
     
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -148,3 +134,54 @@ class SharedDataManager {
 };
 
 } // namespace Utils
+
+
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// 이것으로 교체 해 볼만하다....
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// enum class Data_type {
+//     DT_IMU_TOTAL,   // 1kHz 통합 IMU 데이터 패킷
+//     DT_GPS_20HZ,
+//     DT_BARO_50HZ
+// };
+
+// // 트레이츠 매핑 등록
+// template <Data_type T> struct DataTypeTraits;
+// template <> struct DataTypeTraits<Data_type::DT_IMU_TOTAL> { using Type = ImuData; };
+// template <> struct DataTypeTraits<Data_type::DT_GPS_20HZ>  { using Type = GpsData; };
+// template <> struct DataTypeTraits<Data_type::DT_BARO_50HZ> { using Type = BaroData; };
+
+// class DoubleBufferBroker {
+// private:
+//     // 고정 크기 더블 버퍼 배열들 (동적 할당 없음)
+//     ImuData  _imu_buffers[2]  = {};
+//     GpsData  _gps_buffers[2]  = {};
+//     BaroData _baro_buffers[2] = {};
+
+//     std::atomic<int> _imu_latest_idx{0};
+//     std::atomic<int> _gps_latest_idx{0};
+//     std::atomic<int> _baro_latest_idx{0};
+
+// public:
+//     // 1. 데이터 게시 (생성자 측에서 호출: = 복사 발생)
+//     template <Data_type TypeEnum>
+//     void publish_data(const typename DataTypeTraits<TypeEnum>::Type& new_data) {
+//         if constexpr (TypeEnum == Data_type::DT_IMU_TOTAL) {
+//             int write_idx = 1 - _imu_latest_idx.load(std::memory_order_relaxed);
+//             _imu_buffers[write_idx] = new_data; // 구조체 통째로 = 복사!
+//             _imu_latest_idx.store(write_idx, std::memory_order_release);
+//         }
+//         // ... 나머지 GPS, BARO 분기 생략
+//     }
+
+//     // 2. 데이터 획득 (소비자 측에서 호출: = 복사 반환)
+//     template <Data_type TypeEnum>
+//     typename DataTypeTraits<TypeEnum>::Type get_shared_data() {
+//         if constexpr (TypeEnum == Data_type::DT_IMU_TOTAL) {
+//             int read_idx = _imu_latest_idx.load(std::memory_order_acquire);
+//             return _imu_buffers[read_idx]; // 안전하게 값 타입으로 반환
+//         }
+//         // ... 나머지 분기 생략
+//     }
+// };

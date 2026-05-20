@@ -43,7 +43,7 @@ void ICM20948::set_bus(Interface::IBus *bus){
 esp_err_t ICM20948::enable_mag_bypass()
 {
     if (_ibus == nullptr) return ESP_FAIL;
-    esp_err_t err;
+    //esp_err_t err;
 
     if (_ibus->get_type() == Interface::BusType::I2C) {
         // --- [I2C 모드: 기존 Bypass 로직 유지] ---
@@ -354,7 +354,7 @@ esp_err_t ICM20948::updateSample(SensorData& sample){
  * @param sample_count 
  * @return esp_err_t 
  */
-esp_err_t  ICM20948::calibration_loop(const SensorData& data, int sample_count){
+esp_err_t  ICM20948::calibration_loop(SensorData& data, int sample_count){
     if( _calibration){
         return ESP_OK;
     }

@@ -190,15 +190,10 @@ struct SensorData {
     Vector3f    gyro;               // 자이로 데이터 (deg/s 또는 rad/s)
     //float       temperature = 0.0f; // 센서 온도 (필요 시)
     //uint64_t    timestamp = 0;      // 데이터 획득 시간 (FreeRTOS 틱 또는 마이크로초)
-
     // ★ 지자계(Mag) 독립 파트 추가
     //uint64_t mag_timestamp;   // 지자계 데이터가 '실제 갱신된' 시점 (us)
     Vector3f mag;
     bool     is_mag_updated;      // 이번 루프에 지자계 새 데이터가 들어왔는지 여부 (플래그)
-
-    float    altitude;
-    float    altitude_rate;
-    bool     is_alt_updatd;
 };
 
 

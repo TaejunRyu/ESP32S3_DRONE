@@ -35,7 +35,7 @@ class ICM20948 : public Interface::IImuSensor{
         esp_err_t   read_data(SensorData& raw);
         esp_err_t   enable_mag_bypass();
         bool        is_initialized() { return _initialized; };
-        esp_err_t   calibration_loop(const SensorData &data, int sample_count);
+        esp_err_t   calibration_loop(SensorData &data, int sample_count);
         bool        is_calibration(){return _calibration;};
         // filter 처리용.
         void apply_filter(SensorData& io_data);

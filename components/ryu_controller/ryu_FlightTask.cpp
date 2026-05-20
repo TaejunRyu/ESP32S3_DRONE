@@ -66,8 +66,11 @@ void Flight::flight_task(void *pvParameters)
         
     SensorData cur_imu_data {};
     
-    ESP_LOGI(TAG, "Flight 제어 태스크가 Core 1에서 완벽한 데이터 동기화 모드로 가동되었습니다.");
     
+    ESP_LOGI(TAG, "Flight 제어 태스크가 Core 1에서 완벽한 데이터 동기화 모드로 가동되었습니다.");
+    //SensorTask의 준비되어질 시간을 기다려줌. 300이면 1~2ms가 부족하다
+    vTaskDelay(pdMS_TO_TICKS(320));
+
     while (true) {
         // [초고속 저지연 파이프라인] Core 0의 센서 태스크가 매니저에 데이터를 쓰고 신호를 줄 때까지 대기
         // 1ms 주기로 신호가 인입되므로, 센서 차단 등 비상시 탈출을 위해 타임아웃 마진을 5ms로 설정
@@ -131,7 +134,8 @@ void Flight::flight_task(void *pvParameters)
             }            
         } else {
             // Failsafe 트리거: 5ms 동안 Core 0로부터 동기화 신호(Notification)가 누락된 상황 예외 처리
-            //ESP_LOGW(TAG, "비상: 센서 데이터 동기화 신호 지연 감지!");
+            // SensorTask에서 신호가 안오면 작동이 불능이 되므로 이곳이 실행되어진다.
+            ESP_LOGW(TAG, "비상: 센서 데이터 동기화 신호 지연 감지!");
         }
     }
 
