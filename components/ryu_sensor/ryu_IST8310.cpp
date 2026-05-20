@@ -112,7 +112,7 @@ esp_err_t IST8310::deinitialize()
 
 
 
-esp_err_t IST8310::updateSample(ImuData &sample)
+esp_err_t IST8310::updateSample(SensorData &sample)
 {
       // 1. 하드웨어 버스 연결 상태 방어적 체크
     if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        

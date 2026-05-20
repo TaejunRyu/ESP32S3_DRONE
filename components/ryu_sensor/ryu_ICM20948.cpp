@@ -128,11 +128,11 @@ esp_err_t ICM20948::select_bank(uint8_t bank)
  */
 #include <math.h> // 함수 외부 상단에 포함되어 있는지 확인하세요.
 
-esp_err_t ICM20948::read_data(ImuData &raw) {
+esp_err_t ICM20948::read_data(SensorData &raw) {
     if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        
     
     esp_err_t err = ESP_OK;
-    raw.timestamp = esp_timer_get_time(); // 타이밍 정확성을 위해 최상단에서 시간 측정
+    //raw.timestamp = esp_timer_get_time(); // 타이밍 정확성을 위해 최상단에서 시간 측정
     
     select_bank(0);
     
@@ -150,7 +150,7 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
         raw.gyro.y = (float)((int16_t)((d[8] << 8) | d[9])) * GYRO_SCALE;
         raw.gyro.z = (float)((int16_t)((d[10] << 8) | d[11])) * GYRO_SCALE;
         
-        raw.temperature = (float)((int16_t)((d[12] << 8) | d[13])); 
+        //raw.temperature = (float)((int16_t)((d[12] << 8) | d[13])); 
         raw.is_mag_updated = false; 
     } 
     else {
@@ -167,7 +167,7 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
         raw.gyro.y = (float)((int16_t)((d[8] << 8) | d[9])) * GYRO_SCALE;
         raw.gyro.z = (float)((int16_t)((d[10] << 8) | d[11])) * GYRO_SCALE;
         
-        raw.temperature = (float)((int16_t)((d[12] << 8) | d[13])); 
+        //raw.temperature = (float)((int16_t)((d[12] << 8) | d[13])); 
 
         if(_include_mag){
             // 지자계 상태 레지스터 추출
@@ -198,7 +198,7 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
             // 지자계 데이터 정상 갱신 검사 (Data Ready)
             if (st1 & 0x01) {
                 raw.is_mag_updated = true;
-                raw.mag_timestamp = raw.timestamp;
+                //raw.mag_timestamp = raw.timestamp;
             } else { 
                 raw.is_mag_updated = false;
             }
@@ -212,7 +212,7 @@ esp_err_t ICM20948::read_data(ImuData &raw) {
  *      1. 튀는 값을 LPF 필터링으로 안정화 시킴.
  * @param io_data 
  */
-void ICM20948::apply_filter(ImuData &io_data){
+void ICM20948::apply_filter(SensorData &io_data){
     if (!_calibration) return;
 
     // 1차 LPF 필터링 처리
@@ -230,7 +230,7 @@ void ICM20948::calibration_mag_hard_iron()
     Vector3f max_mag{-99999.0f, -99999.0f, -99999.0f};
     Vector3f min_mag{ 99999.0f,  99999.0f,  99999.0f}; 
 
-    ImuData imudata;
+    SensorData imudata;
     ESP_LOGI(TAG, "지자계 보정 시작: 드론을 모든 방향(8자)으로 돌리세요 (약 30초)...");    
 
     uint32_t total_count = 5000; 
@@ -307,11 +307,11 @@ void ICM20948::calibration_mag_hard_iron()
  * @return false 
  */
 
-esp_err_t ICM20948::updateSample(ImuData& sample){    
+esp_err_t ICM20948::updateSample(SensorData& sample){    
     // 1. 하드웨어 버스 연결 상태 방어적 체크
     if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        
     
-    ImuData data {}; // 임시 버퍼 초기화
+    SensorData data {}; // 임시 버퍼 초기화
     data.acc = 0.0f;
     data.gyro = 0.0f;
     data.mag = 0.0f; 
@@ -328,13 +328,13 @@ esp_err_t ICM20948::updateSample(ImuData& sample){
             sample.acc         = data.acc  ;
             sample.gyro        = data.gyro ;
         }
-        sample.temperature = data.temperature;
-        sample.timestamp   = data.timestamp;
+        //sample.temperature = data.temperature;
+        //sample.timestamp   = data.timestamp;
 
         if (_include_mag){
             if (data.is_mag_updated){
                 sample.mag    = (data.mag -_mag_offset) * _mag_scale;
-                sample.mag_timestamp  = data.mag_timestamp;
+                //sample.mag_timestamp  = data.mag_timestamp;
                 sample.is_mag_updated = data.is_mag_updated;
                 _mag_previous =sample.mag;   //정상으로 읽었을때 자료 보관.
     
@@ -354,7 +354,7 @@ esp_err_t ICM20948::updateSample(ImuData& sample){
  * @param sample_count 
  * @return esp_err_t 
  */
-esp_err_t  ICM20948::calibration_loop(const ImuData& data, int sample_count){
+esp_err_t  ICM20948::calibration_loop(const SensorData& data, int sample_count){
     if( _calibration){
         return ESP_OK;
     }

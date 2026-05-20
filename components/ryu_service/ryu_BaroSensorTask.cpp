@@ -12,7 +12,7 @@
 namespace Service {
 
 void BaroTask::ReadBaroTask(void* pvParameters) {
-    BaroTask* task = static_cast<BaroTask*>(pvParameters);
+    //BaroTask* task = static_cast<BaroTask*>(pvParameters);
     
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(20); // 50Hz = 20ms 주기 작동

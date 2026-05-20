@@ -21,9 +21,9 @@ SensorTask::~SensorTask() {
     // 자원 해제는 태스크의 수명 주기와 일치하도록 내부에서 완벽히 처리합니다.
 }
 
-esp_err_t SensorTask::updateSample(ImuData &sample)
+esp_err_t SensorTask::updateSample(SensorData &sample)
 {
-    ImuData data {}; // 임시 버퍼 초기화
+    SensorData data {}; // 임시 버퍼 초기화
     data.acc = 0.0f;
     data.gyro = 0.0f;
     data.mag = 0.0f; 
@@ -41,12 +41,12 @@ esp_err_t SensorTask::updateSample(ImuData &sample)
             sample.acc         = data.acc;
             sample.gyro        = data.gyro;
         }
-        sample.temperature = data.temperature;
-        sample.timestamp   = data.timestamp;
+        //sample.temperature = data.temperature;
+        //sample.timestamp   = data.timestamp;
 
         if (data.is_mag_updated){
             sample.mag = (data.mag - _icm20948->get_mag_offset()) * _icm20948->get_mag_scale();
-            sample.mag_timestamp  = data.mag_timestamp;
+            //sample.mag_timestamp  = data.mag_timestamp;
             sample.is_mag_updated = data.is_mag_updated;
             _icm20948->set_mag_previous(sample.mag);   // 정상으로 읽었을 때 자료 보관
         } else {
@@ -110,7 +110,7 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
     
     // 3. 실전 비행 데이터 초고속 수집 및 캘리브레이션 무한 루프
     while (true) {
-        ImuData imu_data {};
+        SensorData imu_data {};
         
         // [버그 패치] 호출 주체를 칩 하위 주체 대신 내장된 updateSample 인터페이스로 복원
         esp_err_t err = task->_icm20948->updateSample(imu_data);

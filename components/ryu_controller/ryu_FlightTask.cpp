@@ -4,13 +4,9 @@
 #include <esp_log.h>
 #include <esp_task_wdt.h>
 
-#include "ryu_spi.hpp"
-#include "ryu_ICM20948.hpp"
 
 #include "ryu_Config.hpp"
-#include "ryu_BusInterface.hpp"
 #include "ryu_SharedDataManager.hpp"
-#include "ryu_FrameTransformer.hpp"
 #include "ryu_KalmanFilter.hpp"
 #include "ryu_SensorTask.hpp"
 #include "ryu_espnow.hpp"
@@ -68,7 +64,7 @@ void Flight::flight_task(void *pvParameters)
     
     uint32_t loop_cnt = 0;
         
-    ImuData cur_imu_data {};
+    SensorData cur_imu_data {};
     
     ESP_LOGI(TAG, "Flight 제어 태스크가 Core 1에서 완벽한 데이터 동기화 모드로 가동되었습니다.");
     
@@ -111,16 +107,14 @@ void Flight::flight_task(void *pvParameters)
             if (attitude.yaw < 0.0f)           attitude.yaw += 360.0f;
             else if (attitude.yaw >= 360.0f)   attitude.yaw -= 360.0f;
 
-            // [중계자 복귀] 최종 수렴된 현재 수평 자세를 데이터 매니저에 즉시 업데이트
-            sharedData.setAttitude(attitude);
 
             // QGC 모니터링 전용 Mavlink 버퍼 구조체 데이터 밀어넣기
-            mavlink._attitude.roll        = attitude.roll;
-            mavlink._attitude.pitch       = attitude.pitch;
-            mavlink._attitude.yaw         = attitude.yaw;
-            mavlink._attitude.roll_speed  = cur_imu_data.gyro.x;
-            mavlink._attitude.pitch_speed = cur_imu_data.gyro.y;
-            mavlink._attitude.yaw_speed   = cur_imu_data.gyro.z;
+            attitude.data[3] = cur_imu_data.gyro.x;
+            attitude.data[4] = cur_imu_data.gyro.y;
+            attitude.data[5] = cur_imu_data.gyro.z;
+
+            // [중계자 복귀] 최종 수렴된 현재 수평 자세를 데이터 매니저에 즉시 업데이트
+            sharedData.setAttitude(attitude);
 
             // 여기에 추후 PID 제어 루프를 탑재하시면 됩니다.
             // run_pid_control(attitude, cur_imu_data.gyro);

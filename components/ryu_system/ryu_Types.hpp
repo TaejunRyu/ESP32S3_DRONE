@@ -19,7 +19,6 @@ namespace Utils{
     enum class CoordSystem; 
 }
 
-
 // 1. 센서 3축 데이터 (가속도, 자이로 공용)
 struct Vector3f {
     union {
@@ -151,14 +150,17 @@ struct Vector3{
 // 2. 오일러 각도 기반 드론 자세 데이터
 struct Attitude_t {
     union{
-        float data[3] ={0.0f,};
+        float data[6] ={0.0f,};
         struct{
             float roll  ; // X축 회전 (도 또는 라디안)
             float pitch ; // Y축 회전
             float yaw   ; // Z축 회전
+            float gyro_x; // 추가되는 정보 보관        
+            float gyro_y; // 추가되는 정보 보관        
+            float gyro_z; // 추가되는 정보 보관        
         };
     };
-
+ 
     Attitude_t() = default;
     Attitude_t(float r, float p, float y) : roll(r), pitch(p), yaw(y) {}
     constexpr Attitude_t(const Attitude_t&) = default; 
@@ -183,18 +185,20 @@ struct Attitude_t {
 };
 
 // 3. IMU 종합 데이터 패킷 (원시 데이터 관리용)
-struct ImuData {
+struct SensorData {
     Vector3f    acc;                // 가속도 데이터 (g 또는 m/s^2)
     Vector3f    gyro;               // 자이로 데이터 (deg/s 또는 rad/s)
-    float       temperature = 0.0f; // 센서 온도 (필요 시)
-    uint64_t    timestamp = 0;      // 데이터 획득 시간 (FreeRTOS 틱 또는 마이크로초)
+    //float       temperature = 0.0f; // 센서 온도 (필요 시)
+    //uint64_t    timestamp = 0;      // 데이터 획득 시간 (FreeRTOS 틱 또는 마이크로초)
 
     // ★ 지자계(Mag) 독립 파트 추가
-    uint64_t mag_timestamp;   // 지자계 데이터가 '실제 갱신된' 시점 (us)
+    //uint64_t mag_timestamp;   // 지자계 데이터가 '실제 갱신된' 시점 (us)
     Vector3f mag;
-    bool is_mag_updated;      // 이번 루프에 지자계 새 데이터가 들어왔는지 여부 (플래그)
+    bool     is_mag_updated;      // 이번 루프에 지자계 새 데이터가 들어왔는지 여부 (플래그)
 
-    Utils::CoordSystem current_coordSystem;
+    float    altitude;
+    float    altitude_rate;
+    bool     is_alt_updatd;
 };
 
 
@@ -211,21 +215,3 @@ struct BaroData {
 };
 
 
-/**
- * @brief  
- *      1. qgc에 연결하기위하여 bridge을 경유해야한다.
- *      2. mavlink로 communication
- *      3. 
- * 
- */
-struct QgcInfo{
-    struct MavlinkInfo{
-        size_t sys_id;
-        size_t comp_id;
-        size_t channel;     //기본은 MAVLINK_COM_0 
-    }mavlink;
-
-    struct BridgeInfo{
-        uint8_t bridge_mac[6];    
-    }bridge;
-};

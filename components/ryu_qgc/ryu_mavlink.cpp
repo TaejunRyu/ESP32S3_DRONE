@@ -21,6 +21,7 @@
 // #include "ryu_flight_task.h"
 // #include "ryu_flight_event.h"
 // #include "ryu_utils.h"
+#include  "ryu_SharedDataManager.hpp"
 
 namespace Service{
 
@@ -31,8 +32,8 @@ void Mavlink::send_status_text(const char *text, uint8_t severity)
     strncpy(buf, text, sizeof(buf) - 1);
     // severity: MAV_SEVERITY_INFO (6), MAV_SEVERITY_WARNING (4), MAV_SEVERITY_CRITICAL (2) 등
     mavlink_msg_statustext_pack(
-        _qgcinfo.mavlink.sys_id ,
-       _qgcinfo.mavlink.comp_id ,
+        ConfigMavlink::sys_id ,
+       ConfigMavlink::comp_id ,
         &msg,
         severity,
         buf,0,0
@@ -49,7 +50,7 @@ void Mavlink::send_mav_command_ack(uint16_t command, uint8_t result, uint8_t pro
 {
     mavlink_message_t msg;
     mavlink_msg_command_ack_pack(
-                    _qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id ,    // FC의 System/Component ID
+                    ConfigMavlink::sys_id ,ConfigMavlink::comp_id ,    // FC의 System/Component ID
                     &msg,
                     command,                    // 응답할 명령 번호 
                     result,                     // 결과 (MAV_RESULT_ACCEPTED)
@@ -133,7 +134,7 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
         }
         case MAVLINK_MSG_ID_SYSTEM_TIME:{
             mavlink_message_t ret_msg;
-            mavlink_msg_system_time_pack(_qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id ,&ret_msg,    // 보통 1 (Autopilot)                
+            mavlink_msg_system_time_pack(ConfigMavlink::sys_id ,ConfigMavlink::comp_id ,&ret_msg,    // 보통 1 (Autopilot)                
                 0,                                                                      // Param 1: Unix time (us)
                 (uint32_t)(esp_timer_get_time() / 1000)                                 // Param 2: Boot time (ms)
             );
@@ -146,8 +147,8 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
             mavlink_param_request_list_t req;
             mavlink_msg_param_request_list_decode(msg,&req);
             
-            if (req.target_system != _qgcinfo.mavlink.sys_id  || 
-                (req.target_component !=_qgcinfo.mavlink.comp_id  && req.target_component != 0)) {
+            if (req.target_system != ConfigMavlink::sys_id  || 
+                (req.target_component !=ConfigMavlink::comp_id  && req.target_component != 0)) {
                 break;
             }
 
@@ -164,7 +165,7 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
                     val_to_send = p_mgr.get_value_by_index(i);
                 } 
                 mavlink_message_t msg;
-                mavlink_msg_param_value_pack(_qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id , &msg, 
+                mavlink_msg_param_value_pack(ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, 
                                              par.name.data(), val_to_send, par.type,p_mgr.get_param_count(), i);
                 send_mavlink_msg(&msg);
                 vTaskDelay(pdMS_TO_TICKS(3));
@@ -174,8 +175,8 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
         case MAVLINK_MSG_ID_PARAM_REQUEST_READ: {   
             mavlink_param_request_read_t req;
             mavlink_msg_param_request_read_decode(msg, &req);
-            if (req.target_system != _qgcinfo.mavlink.sys_id  || 
-                (req.target_component !=_qgcinfo.mavlink.comp_id  && req.target_component != 0)) {
+            if (req.target_system != ConfigMavlink::sys_id  || 
+                (req.target_component !=ConfigMavlink::comp_id  && req.target_component != 0)) {
                 break;
             }
             if (req.param_index != -1) 
@@ -192,7 +193,7 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
                     val_to_send = p_mgr.get_value_by_index(req.param_index);
                 }
                 mavlink_message_t msg;
-                mavlink_msg_param_value_pack(_qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id , &msg, 
+                mavlink_msg_param_value_pack(ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, 
                                             Service::params[req.param_index].name.data(),
                                             val_to_send, 
                                             Service::params[req.param_index].type,
@@ -206,8 +207,8 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
         case MAVLINK_MSG_ID_PARAM_SET: {
             mavlink_param_set_t set;
             mavlink_msg_param_set_decode(msg, &set);
-            if (set.target_system != _qgcinfo.mavlink.sys_id  || 
-                (set.target_component !=_qgcinfo.mavlink.comp_id  && set.target_component != 0)) {
+            if (set.target_system != ConfigMavlink::sys_id  || 
+                (set.target_component !=ConfigMavlink::comp_id  && set.target_component != 0)) {
                 break;
             }
             // [중요] 변경된 값을 다시 보내줘야 QGC 화면에서 수치가 확정됨
@@ -228,7 +229,7 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
                 //Controller::PID::get_instance().sync_pid_from_params();
 
                 mavlink_message_t msg;
-                mavlink_msg_param_value_pack(_qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id , &msg, 
+                mavlink_msg_param_value_pack(ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, 
                                             set.param_id, val_to_send, set.param_type,p_mgr.get_param_count(),index);               
                 send_mavlink_msg(&msg);
             }
@@ -241,8 +242,8 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
             mavlink_msg_command_long_decode(msg, &cmd);       
             
             // 나에게 온것이 아니면 처리하지 않음.
-            if (cmd.target_system != _qgcinfo.mavlink.sys_id  || 
-                (cmd.target_component !=_qgcinfo.mavlink.comp_id  && cmd.target_component != 0)) {
+            if (cmd.target_system != ConfigMavlink::sys_id  || 
+                (cmd.target_component !=ConfigMavlink::comp_id  && cmd.target_component != 0)) {
                 break;
             }
             switch (cmd.command){
@@ -311,7 +312,7 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
         case MAVLINK_MSG_ID_MISSION_CLEAR_ALL: {
             mavlink_message_t ack_msg;
             mavlink_msg_mission_ack_pack(
-                _qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id ,
+                ConfigMavlink::sys_id ,ConfigMavlink::comp_id ,
                 &ack_msg,
                 msg->sysid, msg->compid,        // 받는 사람 (GCS)
                 MAV_MISSION_ACCEPTED,           // 결과: 잘 지웠어!
@@ -323,7 +324,7 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
         case MAVLINK_MSG_ID_MISSION_REQUEST_LIST: {
             mavlink_message_t ack_msg;
             mavlink_msg_mission_count_pack(
-                _qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id ,
+                ConfigMavlink::sys_id ,ConfigMavlink::comp_id ,
                 &ack_msg,
                 msg->sysid, msg->compid,    // 받는 사람 (GCS)
                 0,                          // 미션 총 개수
@@ -340,7 +341,7 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
             mavlink_set_mode_t  cmd;
             mavlink_msg_set_mode_decode(msg, &cmd);
             
-            if( cmd.target_system != _qgcinfo.mavlink.sys_id ) break;
+            if( cmd.target_system != ConfigMavlink::sys_id ) break;
             _heartbeat.base_mode = cmd.base_mode;
             if (_heartbeat.base_mode & MAV_MODE_FLAG_CUSTOM_MODE_ENABLED) {
                 
@@ -487,7 +488,7 @@ void Mavlink::MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES_func(mavlink_message_t *msg
 
     // 3. 버전 정보 패킹 및 전송
     mavlink_message_t ver_msg;
-    mavlink_msg_autopilot_version_encode(_qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id , &ver_msg, &version);
+    mavlink_msg_autopilot_version_encode(ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &ver_msg, &version);
     send_mavlink_msg(&ver_msg);
 
 }
@@ -503,8 +504,8 @@ void Mavlink::MAV_CMD_REQUEST_MESSAGE_func(mavlink_message_t *msg, mavlink_comma
         // 1. ACK 패킹 및 전송
         mavlink_message_t ack_msg;
         mavlink_msg_protocol_version_pack(
-            _qgcinfo.mavlink.sys_id ,           // 내 FC 시스템 ID (보통 1)
-           _qgcinfo.mavlink.comp_id ,        // 내 컴포넌트 ID (MAV_COMP_ID_AUTOPILOT1: 1)
+            ConfigMavlink::sys_id ,           // 내 FC 시스템 ID (보통 1)
+           ConfigMavlink::comp_id ,        // 내 컴포넌트 ID (MAV_COMP_ID_AUTOPILOT1: 1)
             &ack_msg,
             200,                 // version: MAVLink 2.0 (200)
             100,                 // min_hw_version: 최소 지원 버전 (100)
@@ -586,8 +587,8 @@ void Mavlink::MAV_CMD_REQUEST_PROTOCOL_VERSION_func(mavlink_message_t *msg, mavl
     send_mav_command_ack(cmd.command, MAV_RESULT_ACCEPTED,0,0,msg->sysid,msg->compid);
     mavlink_message_t ack_msg;
     mavlink_msg_protocol_version_pack(
-        _qgcinfo.mavlink.sys_id ,           // 내 FC 시스템 ID (보통 1)
-       _qgcinfo.mavlink.comp_id ,        // 내 컴포넌트 ID (MAV_COMP_ID_AUTOPILOT1: 1)
+        ConfigMavlink::sys_id ,           // 내 FC 시스템 ID (보통 1)
+       ConfigMavlink::comp_id ,        // 내 컴포넌트 ID (MAV_COMP_ID_AUTOPILOT1: 1)
         &ack_msg,
         200,                 // version: MAVLink 2.0 (200)
         100,                 // min_hw_version: 최소 지원 버전 (100)
@@ -598,7 +599,7 @@ void Mavlink::MAV_CMD_REQUEST_PROTOCOL_VERSION_func(mavlink_message_t *msg, mavl
     send_mavlink_msg(&ack_msg);
 }
 
-void Mavlink::SendtoQgcTask(void *pv)
+void Mavlink::inMessageQueueTask(void *pv)
 {
     //auto& mavlink =  Service::Mavlink::get_instance();
     Mavlink *mavlink = static_cast<Mavlink*>(pv);
@@ -634,9 +635,9 @@ void Mavlink::SendtoQgcTask(void *pv)
 
 void Mavlink::start_task()
 {
-    auto res = xTaskCreatePinnedToCore(SendtoQgcTask, "SendtoQgcTask", 8192, this, 15,nullptr, 0);
-    if (res != pdPASS) ESP_LOGE(TAG, "❌ 3.SendtoQgcTask Task is failed! code: %d", res);
-    else ESP_LOGI(TAG, "✓ 3.SendtoQgcTask task is passed...");
+    auto res = xTaskCreatePinnedToCore(inMessageQueueTask, "inMessageQueueTask", 8192, this, 15,nullptr, 0);
+    if (res != pdPASS) ESP_LOGE(TAG, "❌ inMessageQueueTask Task is failed! code: %d", res);
+    else ESP_LOGI(TAG, "inMessageQueueTask task is passed...");
     //return res;
 }
 
@@ -644,15 +645,18 @@ void Mavlink::on_timer_tick()
 {
     static uint8_t step = 0;
     mavlink_message_t msg;
+
     // 10hz로 구분하고 있으므로 매번 처리...
-    mavlink_msg_attitude_pack(_qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id , &msg, esp_timer_get_time()/1000, 
-                                                _attitude.roll          * DEG_TO_RAD, 
-                                                _attitude.pitch         * DEG_TO_RAD, 
-                                                _attitude.yaw           * DEG_TO_RAD, 
-                                                _attitude.roll_speed    * DEG_TO_RAD, 
-                                                _attitude.pitch_speed   * DEG_TO_RAD, 
-                                                _attitude.yaw_speed     * DEG_TO_RAD 
-                                    );
+    Utils::SharedDataManager& sharedData = Utils::SharedDataManager::getinstance();
+    Attitude_t attitude = sharedData.getAttitude();
+    mavlink_msg_attitude_pack(ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, esp_timer_get_time()/1000, 
+                                        attitude.roll  * DEG_TO_RAD, //roll
+                                        attitude.pitch * DEG_TO_RAD, //pitch
+                                        attitude.yaw   * DEG_TO_RAD, //yaw
+                                        attitude.gyro_x* DEG_TO_RAD, //gyro.x
+                                        attitude.gyro_y* DEG_TO_RAD, //gyro.y
+                                        attitude.gyro_z* DEG_TO_RAD  //gyro.y
+                            );
     send_mavlink_msg(&msg);
 
     static Sensor::Gps::gps_data_t m_gps={};
@@ -680,7 +684,7 @@ void Mavlink::on_timer_tick()
 
     switch (step) {
         case 0:{ // 하트비트 전송
-            mavlink_msg_heartbeat_pack(_qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id ,&msg, 
+            mavlink_msg_heartbeat_pack(ConfigMavlink::sys_id ,ConfigMavlink::comp_id ,&msg, 
                                         MAV_TYPE_QUADROTOR, 
                                         //MAV_AUTOPILOT_GENERIC,
                                         MAV_AUTOPILOT_PX4,
@@ -722,7 +726,7 @@ void Mavlink::on_timer_tick()
             
             // 시스템 상태 패킷 구성 예시
             mavlink_msg_sys_status_pack(
-                _qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id , &msg, 
+                ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, 
                 sensors_present, sensors_enabled, sensors_health,         // 센서 상태 비트마스크
                 load,        // CPU Load (0~1000)
                 battery_voltage, current_battery, battery_remaining, 
@@ -733,7 +737,7 @@ void Mavlink::on_timer_tick()
         }    
         case 6:{ // 라디오 상태 전송 (RSSI, Noise)
              mavlink_msg_radio_status_pack_chan(
-                            _qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id ,MAVLINK_COMM_1, &msg, 
+                            ConfigMavlink::sys_id ,ConfigMavlink::comp_id ,MAVLINK_COMM_1, &msg, 
                             Service::EspNow::get_instance().current_rssi, // 드론이 받은 브릿지의  신호
                             0,0, Service::EspNow::get_instance().noise_floor, 0, 0, 0);
             send_mavlink_msg(&msg);
@@ -742,7 +746,7 @@ void Mavlink::on_timer_tick()
         case 9:{ // gps 정보 
             if (m_gps.home_alt > -9000.0f && m_gps.fixType >= 3) {
                 mavlink_msg_gps_raw_int_pack(
-                        _qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id , &msg, 
+                        ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, 
                         esp_timer_get_time() / 1000,               
                         m_gps.fixType,                              // 실제 Fix 타입을 그대로 전달 (0~4)                     
                         static_cast<int32_t>(m_gps.lat * 1e7),      // 위도
@@ -758,7 +762,7 @@ void Mavlink::on_timer_tick()
                         m_gps.vAcc,                                 // 수직 정확도 (mm)
                         m_gps.sAcc,                                 // 속도 정확도 (mm/s)
                         0,                                          // hdg_acc – [degE5] Heading / track uncertainty
-                        static_cast<uint16_t>(_attitude.yaw * 100.0f) // yaw (cdeg 단위로 변환)
+                        static_cast<uint16_t>(attitude.yaw * 100.0f) // yaw (cdeg 단위로 변환)
                     );
                     send_mavlink_msg(&msg);
             }
@@ -773,7 +777,7 @@ void Mavlink::on_timer_tick()
                 int32_t alt_rel = static_cast<int32_t>((m_gps.hMSL - m_gps.home_alt) );
                 
                 mavlink_msg_global_position_int_pack(
-                    _qgcinfo.mavlink.sys_id ,_qgcinfo.mavlink.comp_id , &msg, esp_timer_get_time()/1000,
+                    ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, esp_timer_get_time()/1000,
                     static_cast<int32_t>(m_gps.lat * 1e7), 
                     static_cast<int32_t>(m_gps.lon * 1e7),
                     static_cast<int32_t>(alt_msl),      // 해수면 고도
@@ -782,7 +786,7 @@ void Mavlink::on_timer_tick()
                     static_cast<int16_t>(m_gps.velN),   // 단위(cm/s) gps에서 데이터를 받아 처리 VGT문장에서 받으면 된다.
                     static_cast<int16_t>(m_gps.velE),
                     static_cast<int16_t>(m_gps.velD),
-                    static_cast<int16_t>(_attitude.yaw * 100.0f)
+                    static_cast<int16_t>(attitude.yaw * 100.0f)
                 );
 
                     send_mavlink_msg(&msg);
@@ -801,8 +805,6 @@ void Mavlink::on_timer_tick()
 
 esp_err_t Mavlink::initialize()
 {
-    _qgcinfo.mavlink.sys_id = 1;
-    _qgcinfo.mavlink.comp_id = 1;
     
     _heartbeat ={
             .base_mode =    MAV_MODE_FLAG_CUSTOM_MODE_ENABLED | //MAV_MODE_FLAG_TEST_ENABLED    |    // 테스트 모드 (실제 비행에서는 사용 안 함)

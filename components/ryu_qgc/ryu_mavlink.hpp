@@ -19,15 +19,6 @@ class Mavlink{
             uint32_t    custom_mode;
         };
 
-        struct attitude_t{
-            float   roll; 
-            float   pitch;
-            float   yaw;
-            float   roll_speed;
-            float   pitch_speed;
-            float   yaw_speed;
-        };
-
     private:
         Mavlink() = default; 
         ~Mavlink() = default;
@@ -42,7 +33,6 @@ class Mavlink{
         Mavlink& operator=(Mavlink&&) = delete;
 
         heartbeat_t _heartbeat;
-        attitude_t  _attitude;
 
         void send_status_text(const char *text, uint8_t severity = MAV_SEVERITY_INFO);
         void send_mavlink_msg(mavlink_message_t *msg);
@@ -58,7 +48,7 @@ class Mavlink{
         void MAV_CMD_SET_MESSAGE_INTERVAL_func(mavlink_message_t *msg, mavlink_command_long_t cmd);
         void MAV_CMD_REQUEST_PROTOCOL_VERSION_func(mavlink_message_t *msg, mavlink_command_long_t cmd);
   
-        static void SendtoQgcTask(void * pv);
+        static void inMessageQueueTask(void * pv);
         void start_task();
         void on_timer_tick();
         esp_err_t initialize();
@@ -66,7 +56,6 @@ class Mavlink{
         bool is_initialized(){ return _initialized;};
 
     private:
-        QgcInfo _qgcinfo {};
         bool _initialized = false;
 };
 

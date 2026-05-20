@@ -31,17 +31,16 @@ class ICM20948 : public Interface::IImuSensor{
         // 상태 관리
         esp_err_t   initialize() override;
         esp_err_t   deinitialize()  override;
-        esp_err_t   updateSample(ImuData& sample) override;
-        esp_err_t   read_data(ImuData& raw);
+        esp_err_t   updateSample(SensorData& sample) override;
+        esp_err_t   read_data(SensorData& raw);
         esp_err_t   enable_mag_bypass();
         bool        is_initialized() { return _initialized; };
-        esp_err_t   calibration_loop(const ImuData &data, int sample_count);
+        esp_err_t   calibration_loop(const SensorData &data, int sample_count);
         bool        is_calibration(){return _calibration;};
         // filter 처리용.
-        void apply_filter(ImuData& io_data);
+        void apply_filter(SensorData& io_data);
 
-        void align_NED(ImuData& data){
-            data.current_coordSystem = Utils::CoordSystem::NED;
+        void align_NED(SensorData& data){
             data.acc.y  *= -1.0f;  
             data.gyro.x *= -1.0f;
             data.gyro.z *= -1.0f;

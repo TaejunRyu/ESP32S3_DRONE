@@ -30,7 +30,7 @@ class SensorTask {
 
         // [방어 설계] 동적 할당된 센서 객체를 안전하게 해제하도록 소멸자를 명시합니다.
         ~SensorTask();
-        esp_err_t updateSample(ImuData& sample);
+        esp_err_t updateSample(SensorData& sample);
 
         // FreeRTOS 태스크 진입용 static 함수
         static void ReadSensorTask(void* pvParameters);

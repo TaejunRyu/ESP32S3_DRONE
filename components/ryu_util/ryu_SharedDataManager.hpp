@@ -16,6 +16,21 @@
 
 namespace Utils {
 
+enum class Data_type{
+    DT_IMU_DATA,
+    DT_BARO_DATA,
+    DT_MAG_DATA,
+    DT_CURRENT_ATTITUDE,
+    DT_TARGET_ATTITUDE
+};
+
+// 1. Enum과 실제 타입을 매핑하는 구조체 정의
+template <Data_type T> struct DataTypeTraits;
+template <> struct DataTypeTraits<Data_type::DT_IMU_DATA> { using Type = SensorData; };
+template <> struct DataTypeTraits<Data_type::DT_BARO_DATA> { using Type = BaroData; };
+template <> struct DataTypeTraits<Data_type::DT_CURRENT_ATTITUDE> { using Type = Attitude_t; };
+template <> struct DataTypeTraits<Data_type::DT_TARGET_ATTITUDE> { using Type = Attitude_t; };
+
 class SharedDataManager {
     private:
         static constexpr const char* TAG = "SharedDataManager";    
@@ -26,35 +41,52 @@ class SharedDataManager {
         ~SharedDataManager() = default; // 뮤텍스가 없으므로 해제 자원도 없음 (메모리 절약)
 
         // 실제 공유 데이터 저장소 (멀티코어 다이렉트 복사용 캐시)
-        ImuData         _shared_imu_data   {};
+        SensorData         _shared_imu_data   {};
         Attitude_t      _currentAttitude   {};
         Attitude_t      _targetAttitude    {}; 
         BaroData        _shared_baro_data  {};
         
-        // 💡 [멀티코어 방어 설계] 부팅 후 0점 교정이 완벽히 완료되었는지 동기화를 보장하는 전역 플래그
+        // 부팅 후 0점 교정이 완벽히 완료되었는지 동기화를 보장하는 전역 플래그
         std::atomic<bool> _is_imu_calibrated;
 
-        // 💡 [아키텍처 추가] Core 0와 Core 1을 연결하는 동기화 배턴용 비행 태스크 핸들 원자적 보관소
+        //Core 0와 Core 1을 연결하는 동기화 배턴용 비행 태스크 핸들 원자적 보관소
         std::atomic<TaskHandle_t> _flight_task_handle;
 
     public:
         static SharedDataManager& getinstance() {
             static SharedDataManager instance;
             return instance;
-        }
-        
+        }       
         SharedDataManager(const SharedDataManager&) = delete;
         SharedDataManager& operator=(const SharedDataManager&) = delete;
         SharedDataManager& operator=(SharedDataManager&&) = delete;
 
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         // --- 1. IMU 데이터 창구 (뮤텍스 락 완전 제거) ---
         // Core 0 전용: 읽기 태스크와 충돌 가능성이 시각적으로 격리되어 있으므로 락 없이 즉시 갱신
-        void update_latest_imu(const ImuData& new_data) {
+        void update_latest_imu(const SensorData& new_data) {
             _shared_imu_data = new_data; 
         }
 
         // Core 1 전용: Notification을 받고 들어오므로 무조건 최신 데이터 복사 성공 보장
-        bool get_latest_imu(ImuData& out_data) {
+        bool get_latest_imu(SensorData& out_data) {
             out_data = _shared_imu_data;
             return true; 
         }
@@ -89,6 +121,10 @@ class SharedDataManager {
             return out_data.is_updated; 
         }
 
+
+        
+        
+        
         // --- 5. IMU 캘리브레이션 플래그 창구 ---
         void set_imu_calibrated(bool state) {
             _is_imu_calibrated.store(state, std::memory_order_release);
@@ -108,6 +144,7 @@ class SharedDataManager {
         TaskHandle_t get_flight_task_handle() {
             return _flight_task_handle.load(std::memory_order_acquire);
         }
+
 };
 
 } // namespace Utils

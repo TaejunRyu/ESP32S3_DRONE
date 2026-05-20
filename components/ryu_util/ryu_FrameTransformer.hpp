@@ -35,7 +35,7 @@ private:
     static constexpr const char* TAG = "FrameTransformer";    
 public:
     // 단독 유틸리티 함수로 선언하여 객체 생성 없이도 쓸 수 있게 설계
-    static void align_to_body(ImuData& src, SensorRotation rotation) {
+    static void align_to_body(SensorData& src, SensorRotation rotation) {
         // 가속도 변환
         Vector3f aligned_acc = transform_vector(src.acc, rotation);
         // 자이로 변환
@@ -50,24 +50,24 @@ public:
      * @param src 센서 칩에서 갓 읽어온 순수 변환 데이터 (물리 단위 완료 상태)
      * @param target_system 상위 칼만/PID가 사용하는 좌표계 (NED 또는 ENU)
      */
-    static void convert_to(ImuData& src, CoordSystem target_system) {
-if (src.current_coordSystem == target_system) return;
+    static void convert_to(SensorData& src, CoordSystem target_system) {
+        // if (src.current_coordSystem == target_system) return;
 
-    // 가속도, 자이로, 지자계 모두 동일한 축 변환 규칙을 따릅니다.
-    auto swap_and_invert = [](Vector3f& v) {
-        float old_x = v.x; float old_y = v.y; float old_z = v.z;
-        v.x = old_y;       v.y = old_x;       v.z = -old_z;
-    };
+        // // 가속도, 자이로, 지자계 모두 동일한 축 변환 규칙을 따릅니다.
+        // auto swap_and_invert = [](Vector3f& v) {
+        //     float old_x = v.x; float old_y = v.y; float old_z = v.z;
+        //     v.x = old_y;       v.y = old_x;       v.z = -old_z;
+        // };
 
-    if ((src.current_coordSystem == CoordSystem::NED && target_system == CoordSystem::ENU) ||
-        (src.current_coordSystem == CoordSystem::ENU && target_system == CoordSystem::NED)) {
-        
-        swap_and_invert(src.acc);
-        swap_and_invert(src.gyro);
-        swap_and_invert(src.mag); // 지자계 데이터 구조체에 추가 필요
+        // if ((src.current_coordSystem == CoordSystem::NED && target_system == CoordSystem::ENU) ||
+        //     (src.current_coordSystem == CoordSystem::ENU && target_system == CoordSystem::NED)) {
+            
+        //     swap_and_invert(src.acc);
+        //     swap_and_invert(src.gyro);
+        //     swap_and_invert(src.mag); // 지자계 데이터 구조체에 추가 필요
 
-        src.current_coordSystem = target_system;
-    }
+        //     src.current_coordSystem = target_system;
+        // }
     }
 private:
     static Vector3f transform_vector(const Vector3f& vec, SensorRotation rotation) {

@@ -27,7 +27,7 @@ class IST8310  : public Interface::IImuSensor{
         Interface::IBus* get_bus(){ return _ibus;};    
         esp_err_t initialize() override;
         esp_err_t deinitialize() override;
-        esp_err_t updateSample(ImuData &sample) override;
+        esp_err_t updateSample(SensorData &sample) override;
         bool is_initialized(){return _initialized;};
         
         esp_err_t read_data(Vector3f data);
