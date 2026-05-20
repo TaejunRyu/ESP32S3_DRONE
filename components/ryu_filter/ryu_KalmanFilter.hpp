@@ -7,6 +7,8 @@
 namespace Filter {
 
 class KalmanFilter {
+private:
+    static constexpr const char* TAG = "KalmanFilter";
 public:
     static KalmanFilter& getInstance() {
         static KalmanFilter instance;

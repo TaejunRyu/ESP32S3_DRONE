@@ -30,12 +30,12 @@ struct VehicleState_t {
 };
 
 class SafeGuard{
-        static inline constexpr char* TAG ="SafeGuard";
+        static constexpr const char* TAG = "SafeGuard";
 
         // 임계값 정의 (실제 환경에 맞게 미세 조정 가능)
-        const float IMU_ERR_CRITICAL    = 0.08f;  // Roll/Pitch 오차 한계치
-        const float MAG_ERR_CRITICAL    = 0.12f;  // Yaw 오차 한계치
-        const uint32_t ERR_DURATION_MS  = 1500; // 오차가 지속되는 허용 시간 (1.5초)
+        static constexpr const float IMU_ERR_CRITICAL    = 0.08f;  // Roll/Pitch 오차 한계치
+        static constexpr const float MAG_ERR_CRITICAL    = 0.12f;  // Yaw 오차 한계치
+        static constexpr const uint32_t ERR_DURATION_MS  = 1500; // 오차가 지속되는 허용 시간 (1.5초)
 
         VehicleState_t _vehicle_state = { FlightMode::MANUAL, 0.0f, 0.0f, 0.5f };
 

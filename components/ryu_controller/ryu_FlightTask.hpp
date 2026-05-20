@@ -22,9 +22,8 @@ namespace Controller{
 
 class Flight{
     
-
-
-    static constexpr const char* TAG = "Flight";
+    private: 
+        static constexpr const char* TAG = "Flight";
 
     public:
         static Flight& getInstance() {

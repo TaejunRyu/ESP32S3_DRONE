@@ -21,8 +21,13 @@ enum class SensorRotation {
     YAW_90,               // 시계방향 90도 회전 장착
     YAW_180,              // 뒤집어서 장착 (180도 회전)
     YAW_270,              // 반시계방향 90도 회전 장착
+    ROLL_90,
+    ROLL_270,
     ROLL_180,             // 보드가 뒤집혀 아랫면을 봄 (가장 흔함)
-    ROLL_180_YAW_90       // 보드가 뒤집히고 90도 회전됨
+    ROLL_180_YAW_90,
+    PITCH_90,
+    PITCH_270,
+
 };
 
 class FrameTransformer {

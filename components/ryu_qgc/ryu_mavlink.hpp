@@ -11,25 +11,26 @@ namespace Service
 
   
 class Mavlink{
+    private:
+        static constexpr const char* TAG = "Mavlink";
+    
+        struct heartbeat_t{
+            uint8_t     base_mode;
+            uint32_t    custom_mode;
+        };
 
-    struct heartbeat_t{
-        uint8_t     base_mode;
-        uint32_t    custom_mode;
-    };
-
-    struct attitude_t{
-        float   roll; 
-        float   pitch;
-        float   yaw;
-        float   roll_speed;
-        float   pitch_speed;
-        float   yaw_speed;
-    };
+        struct attitude_t{
+            float   roll; 
+            float   pitch;
+            float   yaw;
+            float   roll_speed;
+            float   pitch_speed;
+            float   yaw_speed;
+        };
 
     private:
         Mavlink() = default; 
         ~Mavlink() = default;
-        static constexpr const char* TAG = "Mavlink";
     public:
         static Mavlink& get_instance() {
             static Mavlink instance; 

@@ -18,6 +18,7 @@ namespace Utils {
 
 class SharedDataManager {
     private:
+        static constexpr const char* TAG = "SharedDataManager";    
         SharedDataManager() {
             _is_imu_calibrated.store(false);
             _flight_task_handle.store(nullptr); // 초기화

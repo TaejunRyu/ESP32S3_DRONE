@@ -11,7 +11,7 @@
  */
 #pragma once
 #include <cmath>
-#include "ryu_DroneTypes.hpp"
+#include "ryu_Types.hpp"
 namespace Utils {
 
 // 각도 단위 정의
@@ -20,7 +20,7 @@ enum class AngleUnit { RADIAN, DEGREE };
 
 class AngleTransformer {
 private:
-    static constexpr const char* TAG = "AngleTransformer";        
+        static constexpr const char* TAG = "AngleTransformer";
 public:
     /**
      * @brief ENU 각도 체계를 드론 표준 NED 각도 체계로 변환합니다.
@@ -28,8 +28,8 @@ public:
      * @param unit 입력 데이터의 단위 (라디안 또는 디그리)
      * @return Attitude 변환 완료된 NED 기반 각도 구조체
      */
-    static Attitude enu_to_ned(const Attitude& enu, AngleUnit unit) {
-        Attitude ned = {};
+    static Attitude_t enu_to_ned(const Attitude_t& enu, AngleUnit unit) {
+        Attitude_t ned = {};
 
         if (unit == AngleUnit::DEGREE) {
             // 1. Degree 변환 (90 - Yaw 공식 적용)

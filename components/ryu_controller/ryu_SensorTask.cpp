@@ -11,7 +11,7 @@
 #include "ryu_BusInterface.hpp"
 #include "ryu_KalmanFilter.hpp"
 
-static const char* TAG = "SensorTask";
+
 
 namespace Service {
 

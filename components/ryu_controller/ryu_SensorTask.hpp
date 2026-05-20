@@ -15,6 +15,7 @@ namespace Service {
 
 class SensorTask {
 private:        
+    static constexpr const char* TAG = "SensorTask";
     // [방어 설계] 모든 센서 인스턴스와 매니저 포인터는 private 영역에 격리합니다.
     Sensor::ICM20948            *_icm20948;
     Utils::SharedDataManager    *_data_manager;

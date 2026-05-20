@@ -3,16 +3,21 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "ryu_KalmanFilter.hpp"
 
 
 namespace Controller{
 
 void SafeGuard::SafeGuard_task(void *pv)
 {
+    SafeGuard *safeguard = static_cast<SafeGuard *> (pv); 
+
     uint32_t imu_err_start_tick = 0;
     uint32_t mag_err_start_tick = 0;
     bool is_imu_fault = false;
     bool is_mag_fault = false;
+
+
 
     while (1) {
         // 1. EKF 싱글톤에서 실시간 공분산 오차 직접 참조
@@ -24,10 +29,10 @@ void SafeGuard::SafeGuard_task(void *pv)
         uint32_t current_tick = xTaskGetTickCount();
 
         // 2. IMU (Roll/Pitch) 오차 누적 감시
-        if (x_err > IMU_ERR_CRITICAL || y_err > IMU_ERR_CRITICAL) {
+        if (x_err > SafeGuard::IMU_ERR_CRITICAL || y_err > SafeGuard::IMU_ERR_CRITICAL) {
             if (imu_err_start_tick == 0) imu_err_start_tick = current_tick;
             
-            if ((current_tick - imu_err_start_tick) >= pdMS_TO_TICKS(ERR_DURATION_MS)) {
+            if ((current_tick - imu_err_start_tick) >= pdMS_TO_TICKS(SafeGuard::ERR_DURATION_MS)) {
                 is_imu_fault = true;
             }
         } else {
@@ -35,10 +40,10 @@ void SafeGuard::SafeGuard_task(void *pv)
         }
 
         // 3. 지자계 (Yaw) 오차 누적 감시
-        if (z_err > MAG_ERR_CRITICAL) {
+        if (z_err > SafeGuard::MAG_ERR_CRITICAL) {
             if (mag_err_start_tick == 0) mag_err_start_tick = current_tick;
             
-            if ((current_tick - mag_err_start_tick) >= pdMS_TO_TICKS(ERR_DURATION_MS)) {
+            if ((current_tick - mag_err_start_tick) >= pdMS_TO_TICKS(SafeGuard::ERR_DURATION_MS)) {
                 is_mag_fault = true;
             }
         } else {
@@ -46,15 +51,15 @@ void SafeGuard::SafeGuard_task(void *pv)
         }
 
         // 4. 비상 조치 트리거 (인터럽트 스위칭)
-        if (g_vehicle_state.mode != FlightMode::EMERGENCY_LAND) {
+        if (safeguard->_vehicle_state.mode != FlightMode::EMERGENCY_LAND) {
             if (is_imu_fault) {
                 ESP_LOGE(TAG, "!!! CRITICAL IMU FAULT DETECTED !!! 비상 착륙을 시작합니다.");
-                g_vehicle_state.mode = FlightMode::EMERGENCY_LAND;
+                safeguard->_vehicle_state.mode = FlightMode::EMERGENCY_LAND;
             } 
             else if (is_mag_fault) {
                 ESP_LOGW(TAG, "!!! COMPASS FAULT DETECTED !!! 지자계 보정을 차단하고 자이로 관성 비행으로 착륙합니다.");
                 // 지자계 오차일 경우 나침반 보정을 끄고(R_mag 가중치를 무한대로 올리는 효과) 안전 착륙 모드 진입
-                g_vehicle_state.mode = FlightMode::EMERGENCY_LAND;
+                safeguard->_vehicle_state.mode = FlightMode::EMERGENCY_LAND;
             }
         }
 
@@ -62,6 +67,10 @@ void SafeGuard::SafeGuard_task(void *pv)
     }
 }
 
+esp_err_t SafeGuard::start_task()
+{
+    return esp_err_t();
+}
 
 } // namespace Controller
 

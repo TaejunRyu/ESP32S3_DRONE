@@ -95,8 +95,9 @@ void Flight::flight_task(void *pvParameters)
             Vector3f gyro_rad = cur_imu_data.gyro * DEG_TO_RAD;
 
             // [EKF 핵심 엔진 가동] 자이로 예측 후 가속도/지자계 순차 보정 처리
-            kalman.predict(gyro_rad, dt);
-            kalman.update(cur_imu_data.acc, cur_imu_data.mag);
+            kalman.update(cur_imu_data.acc,gyro_rad, cur_imu_data.mag,dt);
+            // kalman.predict(gyro_rad, dt);
+            // kalman.update(cur_imu_data.acc, cur_imu_data.mag);
                         
             // 진북 기준 최종 오일러 각 추출 (라디안 단위)
             Attitude_t attitude = kalman.getEuler();
@@ -127,15 +128,15 @@ void Flight::flight_task(void *pvParameters)
             // run_pid_control(attitude, cur_imu_data.gyro);
 
             // [출력 가독성 최적화] UART 병목 및 로깅 오버헤드를 막기 위한 50Hz(20ms) 주기 필터링 로그
-            if (++loop_cnt >= 20) { 
-                loop_cnt = 0;
-                ESP_LOGI(TAG, "|AX: %8.5f |AY: %8.5f |AZ: %8.5f |GX: %8.5f |GY: %8.5f |GZ: %8.5f |MX: %8.5f |MY: %8.5f |MZ: %8.5f |R: %8.5f |P: %8.5f |Y: %8.5f", 
-                        cur_imu_data.acc.x,   cur_imu_data.acc.y,   cur_imu_data.acc.z,
-                        gyro_rad.x,           gyro_rad.y,           gyro_rad.z,
-                        cur_imu_data.mag.x,   cur_imu_data.mag.y,   cur_imu_data.mag.z,
-                        attitude.roll,        attitude.pitch,       attitude.yaw
-                    );
-            }            
+            // if (++loop_cnt >= 20) { 
+            //     loop_cnt = 0;
+            //     ESP_LOGI(TAG, "|AX: %8.5f |AY: %8.5f |AZ: %8.5f |GX: %8.5f |GY: %8.5f |GZ: %8.5f |MX: %8.5f |MY: %8.5f |MZ: %8.5f |R: %8.5f |P: %8.5f |Y: %8.5f", 
+            //             cur_imu_data.acc.x,   cur_imu_data.acc.y,   cur_imu_data.acc.z,
+            //             gyro_rad.x,           gyro_rad.y,           gyro_rad.z,
+            //             cur_imu_data.mag.x,   cur_imu_data.mag.y,   cur_imu_data.mag.z,
+            //             attitude.roll,        attitude.pitch,       attitude.yaw
+            //         );
+            // }            
         } else {
             // Failsafe 트리거: 5ms 동안 Core 0로부터 동기화 신호(Notification)가 누락된 상황 예외 처리
             //ESP_LOGW(TAG, "비상: 센서 데이터 동기화 신호 지연 감지!");
@@ -158,7 +159,6 @@ void Flight::start_task()
         &_taskHandle,                    
         1 
     );
-
     // [아키텍처 완성] 태스크가 정상 생성되자마자 중계자(SharedDataManager)에 내 핸들을 곧바로 중앙 등록
     Utils::SharedDataManager::getinstance().register_flight_task_handle(_taskHandle);
 }
