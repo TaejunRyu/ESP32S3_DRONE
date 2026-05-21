@@ -1,12 +1,18 @@
 #include "ryu_BMP388.hpp"
+
 #include <tuple>
-#include <freertos/FreeRTOS.h>
-#include "ryu_i2c.hpp" 
 #include "ryu_BusInterface.hpp"
 
 namespace Sensor{
 BMP388::~BMP388(){
-    //
+}
+
+void BMP388::set_bus(Interface::IBus *bus)
+{
+    if (_ibus != nullptr) {
+        delete _ibus; // 기존에 할당되어 있던 SPIBus 또는 I2CBus 객체 파괴
+    }
+    _ibus = bus; 
 }
 
 esp_err_t BMP388::updateSample(SensorData &sample)
@@ -99,9 +105,10 @@ esp_err_t BMP388::deinitialize()
     if (!_initialized) {
         return ESP_OK;
     }
-    // 2. 하드웨어 자원 해제 (중요!)
-    // 만약 BusInterface 객체의 생명주기를 ICM20948이 관리한다면 여기서 delete 합니다.
-    // 외부에서 관리한다면 단순히 포인터를 nullptr로 만듭니다.
+    if (_ibus != nullptr) {
+        delete _ibus; // 기존에 할당되어 있던 SPIBus 또는 I2CBus 객체 파괴
+    }
+
     _ibus = nullptr; 
     // 3. 상태 업데이트
     _initialized = false;

@@ -14,7 +14,7 @@ namespace Interface {
 namespace Sensor
 {
 
-class IST8310  : public Interface::IImuSensor{
+class IST8310  : public Interface::ISensor{
     private:
         IST8310()= default;
         static constexpr const char* TAG = "IST8310";

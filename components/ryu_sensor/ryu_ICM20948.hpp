@@ -1,10 +1,6 @@
 #pragma once
 #include <memory>
-#include <driver/spi_master.h>
-#include <driver/gpio.h>
-
 #include "ryu_ImuInterface.hpp"
-//#include "ryu_FrameTransformer.hpp"
 
 namespace Interface{
     class IBus;
@@ -12,7 +8,7 @@ namespace Interface{
 
 namespace Sensor{
 
-class ICM20948 : public Interface::IImuSensor{
+class ICM20948 : public Interface::ISensor{
     private:
         ICM20948()= default;
         static constexpr const char* TAG = "ICM20948";

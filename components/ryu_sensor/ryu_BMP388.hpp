@@ -2,9 +2,7 @@
 
 #include <math.h>
 #include <algorithm>
-
 #include <string>
-#include <driver/i2c_master.h>
 #include <esp_log.h>
 #include "ryu_ImuInterface.hpp"
 
@@ -13,10 +11,9 @@ namespace Interface{
     class IBus;
 }
 
-
 namespace Sensor{
 
-class BMP388 : public Interface::IImuSensor{
+class BMP388 : public Interface::ISensor{
     private:
         BMP388()= default;
         static constexpr const char* TAG = "BMP388";

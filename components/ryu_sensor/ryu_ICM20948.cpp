@@ -1,23 +1,15 @@
 #include "ryu_ICM20948.hpp"
 
+#include <math.h> 
 #include <esp_log.h>
-#include <rom/ets_sys.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <esp_timer.h>
 #include <esp_task_wdt.h>
 #include "ryu_BusInterface.hpp"
-#include "ryu_Config.hpp"
 
 
 namespace Sensor{
     
 ICM20948::~ICM20948()
 {
-    if (_ibus) {
-        delete _ibus; // 이 순간 자식(SPIBus) 소멸자가 호출되며 하드웨어 자원(spi_bus_remove_device)까지 완전히 해제됩니다.
-        _ibus = nullptr;
-    }
 }
 
 
@@ -120,7 +112,6 @@ esp_err_t ICM20948::select_bank(uint8_t bank)
  * @param raw 
  * @return esp_err_t 
  */
-#include <math.h> // 함수 외부 상단에 포함되어 있는지 확인하세요.
 
 esp_err_t ICM20948::read_data(SensorData &raw) {
     if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        
@@ -433,6 +424,10 @@ esp_err_t ICM20948::initialize()
 esp_err_t ICM20948::deinitialize(){
     if (!_initialized) {
         return ESP_OK;
+    }
+    if (_ibus) {
+        delete _ibus; // 이 순간 자식(SPIBus) 소멸자가 호출되며 하드웨어 자원(spi_bus_remove_device)까지 완전히 해제됩니다.
+        _ibus = nullptr;
     }
     _ibus = nullptr; 
     _initialized = false;

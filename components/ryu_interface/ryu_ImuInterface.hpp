@@ -1,15 +1,16 @@
 
 #pragma once
-#include "ryu_Types.hpp"
 #include <esp_err.h>
+
+#include "ryu_Types.hpp"
 
 
 namespace Interface{
 
 // 각 sensor는 해당 인터페이스를 계승 받아서 사용.
-class IImuSensor {
+class ISensor {
 public:
-    virtual ~IImuSensor() = default;
+    virtual ~ISensor() = default;
 
     /**
      * @brief 센서 초기화 및 통신 연결 테스트
@@ -27,5 +28,5 @@ public:
 };
 
 
-}// namespace IImuSensor
+}// namespace ISensor
 
