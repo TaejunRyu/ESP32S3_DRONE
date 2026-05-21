@@ -17,4 +17,5 @@ idf_component_register(
         ryu_system
         ryu_util
         ryu_driver
+        ryu_controller
 )

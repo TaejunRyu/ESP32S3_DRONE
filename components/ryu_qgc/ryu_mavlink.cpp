@@ -660,29 +660,12 @@ void Mavlink::on_timer_tick()
                             );
     send_mavlink_msg(&msg);
 
-    static Sensor::Gps::gps_data_t m_gps={};
+    static gps_data_t m_gps={};
     static uint32_t last_itow = 0;     // 마지막으로 전송한 iTOW 저장
 
-
-    // 문제가 발생하면 xSemaphoreTake 이 부분일것 같음.
-    switch(step){
-        case 1: case 8: case 9:{
-            // g_gps 공동 변수에서 읽어와 사용한다.
-            // 정확한 데이터 보장이 필요하기 때문에 시간별 다름을 없애는 목적......
-            // gps시간이 다르면 복사하고 아니면 이전 데이터 사용
-
-            auto& gps = Sensor::Gps::getInstance();
-         //   if (xSemaphoreTake(gps.xGpsMutex, 0 )== pdTRUE) { 
-                if (gps.share_gps.iTOW != last_itow){
-                    m_gps       = gps.share_gps;
-                    last_itow   = gps.share_gps.iTOW;         
-                    m_gps.last_update_tick = xTaskGetTickCount();      
-           //     }
-           //     xSemaphoreGive(gps.xGpsMutex);
-            }
-        }
+    if (step == 1 || step == 8 || step == 9){                        
+        m_gps =  sharedData.get_shared_data<Controller::Data_type::DT_GPS_DATA>();    
     }
-
     switch (step) {
         case 0:{ // 하트비트 전송
             mavlink_msg_heartbeat_pack(ConfigMavlink::sys_id ,ConfigMavlink::comp_id ,&msg, 
@@ -790,7 +773,7 @@ void Mavlink::on_timer_tick()
                     static_cast<int16_t>(attitude.yaw * 100.0f)
                 );
 
-                    send_mavlink_msg(&msg);
+                send_mavlink_msg(&msg);
             //}
             break;
         }

@@ -9,8 +9,9 @@
  */
 
 #pragma once
-#include "ryu_Types.hpp"
 #include <atomic> 
+
+#include "ryu_Types.hpp"
 
 namespace Controller {
 
@@ -20,7 +21,7 @@ enum class Data_type{
     DT_MAG_DATA,            // MAG
     DT_CURRENT_ATTITUDE,    // 
     DT_TARGET_ATTITUDE,
-    DT_GPS_DATA
+    DT_GPS_DATA,
 };
 
 // 트레이츠 매핑 등록
@@ -29,6 +30,7 @@ template <> struct DataTypeTraits<Data_type::DT_IMU_DATA>           { using Type
 template <> struct DataTypeTraits<Data_type::DT_BARO_DATA>          { using Type = BaroData; };
 template <> struct DataTypeTraits<Data_type::DT_CURRENT_ATTITUDE>   { using Type = Attitude_t; };
 template <> struct DataTypeTraits<Data_type::DT_TARGET_ATTITUDE>    { using Type = Attitude_t; };
+template <> struct DataTypeTraits<Data_type::DT_GPS_DATA>           { using Type = gps_data_t; };
 
 class SharedDataManager {
 private:
@@ -43,11 +45,13 @@ private:
     BaroData   _baro_buffers[2]     = {};
     Attitude_t _currentAttitude[2]  = {};
     Attitude_t _targetAttitude[2]   = {}; 
+    gps_data_t _gps_buffer[2]       = {};    
 
     std::atomic<int> _imu_latest_idx{0};
     std::atomic<int> _baro_latest_idx{0};
     std::atomic<int> _curatt_latest_idx{0};
     std::atomic<int> _taratt_latest_idx{0};
+    std::atomic<int> _gps_latest_idx{0};
 
 
     // 부팅 후 0점 교정이 완벽히 완료되었는지 동기화를 보장하는 전역 플래그
@@ -87,6 +91,11 @@ public:
             int write_idx = 1 - _taratt_latest_idx.load(std::memory_order_relaxed);
             _targetAttitude[write_idx] = new_data; 
             _taratt_latest_idx.store(write_idx, std::memory_order_release);
+        }else
+        if constexpr (TypeEnum == Data_type::DT_GPS_DATA) {
+            int write_idx = 1 - _gps_latest_idx.load(std::memory_order_relaxed);
+            _gps_buffer[write_idx] = new_data; 
+            _gps_latest_idx.store(write_idx, std::memory_order_release);
         }   
     }
 
@@ -108,6 +117,10 @@ public:
         if constexpr (TypeEnum == Data_type::DT_TARGET_ATTITUDE) {
             int read_idx = _taratt_latest_idx.load(std::memory_order_acquire);
             return _targetAttitude[read_idx]; 
+        }else
+        if constexpr (TypeEnum == Data_type::DT_GPS_DATA) {
+            int read_idx = _gps_latest_idx.load(std::memory_order_acquire);
+            return _gps_buffer[read_idx]; 
         }
     }
 

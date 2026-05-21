@@ -1,8 +1,9 @@
 #pragma once
 
 #include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
+//#include <freertos/semphr.h>
 #include <driver/gpio.h>
+#include "ryu_Types.hpp"
 
 
 namespace  Sensor
@@ -68,40 +69,11 @@ class  Gps{
             uint16_t magAcc;     // 자기 편각 정확도
         } __attribute__((packed));
 
-
-        // --- GPS 사용자 데이터 ---
-        struct gps_data_t {
-            uint32_t    iTOW;           // gps 시간
-            int         date;           // 기본 날자
-            float       utc_time;       // 기본 시간 
-            uint8_t     fixType;        // GPS 위치 고정 여부
-            uint8_t     numSat;         // 위성 개수
-            double      lat;            // 위도 (deg)
-            double      lon;            // 경도 (deg)
-            int32_t     height;         // 타원체 고도 (mm)    
-            int32_t     horMSL;         // 해수면 고도 (mm)
-            uint32_t    horAcc;         // 수평 정확도(mm)
-            uint32_t    verAcc;         // 수직 정확도(mm)
-            int16_t     velNorth;       // (North Velocity),  GPS정보  VGT 정보에서 뽑아야한다. 
-            int16_t     velEast;        // (East Velocity), 
-            int16_t     velDown;        // (Down Velocity)
-            uint16_t    gndSpeed;       // 지표 속도 (mm/s)
-            uint16_t    headMotion;     // 이동 방향 (Degree * 10^-5 -> Centi-Degree)
-            uint32_t    speedAcc;       // 속도 정확도
-            uint16_t    pDOP;           // 위치 정밀도 저하율 (0.01 단위)
-            float       magDec ;        // 자기 편차 적용 (필요 시)
-            float       relative_alt;   // 상대 고도 (홈 기준)
-            float       home_alt;       // 처음 시스템 시작시(gps가동시)의 고도  
-            TickType_t  last_update_tick;
-        };
-    
-
         static inline constexpr uint32_t   GPS_UART_BAUD_RATE = 115200;
         static inline constexpr gpio_num_t GPS_RX      = GPIO_NUM_16;  // UART1 
         static inline constexpr gpio_num_t GPS_TX      = GPIO_NUM_17;
 
-        SemaphoreHandle_t xGpsMutex = nullptr;
-        gps_data_t share_gps ={};  //< GPS 사용자 데이터>
+        //SemaphoreHandle_t xGpsMutex = nullptr;
         Health Gps_status = Health::HEALTHY;
 
         esp_err_t initialize();
