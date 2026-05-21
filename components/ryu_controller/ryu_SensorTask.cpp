@@ -139,7 +139,8 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
 
             task->_icm20948->align_NED(imu_data);            
             // [중계자 복사] 뮤텍스 락 오버헤드가 제거된 고속 대입 채널 전송
-            task->_data_manager->update_latest_imu(imu_data);
+            //task->_data_manager->update_latest_imu(imu_data);
+            task->_data_manager->publish_data<Utils::Data_type::DT_IMU_DATA>(imu_data);
             // [초고속 저지연 파이프라인] 데이터 준비가 완료되었으므로 Core 1에서 대기 중인 비행 태스크를 즉시 무오래 깨움
             TaskHandle_t flight_handle = task->_data_manager->get_flight_task_handle();
             if (flight_handle != nullptr) {

@@ -86,7 +86,8 @@ void Flight::flight_task(void *pvParameters)
             }
 
             // [중계자 활용] 뮤텍스 락 없이 원자적으로 0마이크로초 만에 최신 IMU 데이터 복사
-            sharedData.get_latest_imu(cur_imu_data);
+            //sharedData.get_latest_imu(cur_imu_data);
+            cur_imu_data = sharedData.get_shared_data< Utils::Data_type::DT_IMU_DATA>();
             
             // 입력 데이터 가공 (입력이 도/초 단위일 경우 예측부 라디안 스케일링 일치 처리)
             Vector3f gyro_rad = cur_imu_data.gyro * DEG_TO_RAD;
@@ -117,7 +118,8 @@ void Flight::flight_task(void *pvParameters)
             attitude.data[5] = cur_imu_data.gyro.z;
 
             // [중계자 복귀] 최종 수렴된 현재 수평 자세를 데이터 매니저에 즉시 업데이트
-            sharedData.setAttitude(attitude);
+            // sharedData.setAttitude(attitude);
+            sharedData.publish_data<Utils::Data_type::DT_CURRENT_ATTITUDE>(attitude);
 
             // 여기에 추후 PID 제어 루프를 탑재하시면 됩니다.
             // run_pid_control(attitude, cur_imu_data.gyro);
