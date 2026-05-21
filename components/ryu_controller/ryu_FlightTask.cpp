@@ -15,9 +15,6 @@
 #include "ryu_battery.hpp"
 
 namespace Controller {
-Flight::Flight() : _taskHandle(nullptr)
-{
-}
 
 esp_err_t Flight::initialize(){
 

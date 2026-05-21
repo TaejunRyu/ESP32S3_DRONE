@@ -30,7 +30,7 @@ class Flight{
             static Flight instance;
             return instance;
         }
-        Flight();
+        Flight() = default;
         ~Flight() = default;
         Flight(const Flight&) = delete;
         Flight& operator=(const Flight&) = delete;
@@ -41,10 +41,10 @@ class Flight{
         TaskHandle_t getTaskHandle(){return _taskHandle;};
         void start_task();
     private:
-        TaskHandle_t _taskHandle;
+        TaskHandle_t _taskHandle = nullptr;
         bool _initialized = false;
 };
 
 
 
-}// namespace Control
+}// namespace Controller

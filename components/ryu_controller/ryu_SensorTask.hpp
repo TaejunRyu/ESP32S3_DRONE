@@ -1,3 +1,15 @@
+/**
+ * @file ryu_SensorTask.hpp
+ * @author your name (you@domain.com)
+ * @brief 
+ *      1. 데이터가 이동이 잦기 때문에 Controller에 있게함.
+ *      2. CORE0 에서 IMU DATA를 Flight task에 공급한다.
+ * @version 0.1
+ * @date 2026-05-21
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
 #pragma once
 
 #include <esp_err.h>
@@ -5,37 +17,29 @@
 
 // 전방 선언 (Forward Declaration)을 통해 컴파일 속도를 최적화합니다.
 namespace Sensor {
-    class ICM20948;  //SPI BUS 사용
-    class IST8310;   //I2C BUS 사용
+    class ICM20948;  // SPI BUS 사용
+    class IST8310;   // I2C BUS 사용   
+    class BMP388;    // SPI BUS 사용   ==>  이곳이 아닌 다른 task에서 늦게 돌려서 처리해야 할것 같음....
 }
 
 namespace Controller { 
 
-class SharedDataManager;
-
 class SensorTask {
-
     private:        
         static constexpr const char* TAG = "SensorTask";
-        // [방어 설계] 모든 센서 인스턴스와 매니저 포인터는 private 영역에 격리합니다.
-        Sensor::ICM20948                *_icm20948;
-        Sensor::IST8310                 *_ist8310;
-        SharedDataManager               *_data_manager;
     public:
-        inline static constexpr int SPI_CS_PIN = 9;
+        SensorTask() = default;
+        ~SensorTask() = default;
+        inline static constexpr int SPI_IMU_CS_PIN = 9;
+        inline static constexpr int SPI_BMP_CS_PIN = 10;
         // [방어 설계] 생성자에서 모든 포인터를 nullptr로 확실하게 초기화하여 쓰레기 값을 방지합니다.
-        SensorTask() 
-            : _icm20948(nullptr),_ist8310(nullptr),_data_manager(nullptr) {}
+        bool is_initialized(){return _initialized;};
+        esp_err_t initialize();
 
-        // [방어 설계] 동적 할당된 센서 객체를 안전하게 해제하도록 소멸자를 명시합니다.
-        ~SensorTask();
-        esp_err_t updateSample(SensorData& sample);
-
-        // FreeRTOS 태스크 진입용 static 함수
         static void ReadSensorTask(void* pvParameters);
-
-        // 태스크 실행 생성 헬퍼
         void StartTask();
+    private:
+        bool _initialized = false;
     };
 
 } // namespace Service
