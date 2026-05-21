@@ -12,12 +12,6 @@
 
 namespace Sensor{
     
-// 생성자 구현
-ICM20948::ICM20948() {
-    // 초기화 코드...
-}
-
-
 ICM20948::~ICM20948()
 {
     if (_ibus) {

@@ -7,11 +7,6 @@
 
 namespace Sensor
 {
-IST8310::IST8310()
-{
-    //
-}
-
 IST8310::~IST8310()
 {
     if (_ibus) {
@@ -30,7 +25,7 @@ esp_err_t IST8310::initialize()
     if (err != ESP_OK){
         return err;
     }
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     //2. WHO_AM_I 확인 (정상 연결 체크)
     uint8_t who_reg = 0x00, who_val = 0;

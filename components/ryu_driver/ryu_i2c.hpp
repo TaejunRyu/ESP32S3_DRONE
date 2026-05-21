@@ -11,7 +11,7 @@ class I2C{
         ~I2C() = default;
         static constexpr const char* TAG = "I2C";
     public:
-        static I2C& get_instance() {
+        static I2C& getInstance() {
             static I2C instance; 
             return instance;
         }

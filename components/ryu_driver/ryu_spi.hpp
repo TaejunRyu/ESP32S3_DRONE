@@ -13,7 +13,7 @@ private:
     static constexpr const char* TAG = "SPI";
 
 public:
-    static SPI& get_instance() {
+    static SPI& getInstance() { 
         static SPI instance;
         return instance;
     }

@@ -2,6 +2,8 @@
 
 #include <driver/uart.h>
 #include <esp_log.h>
+
+#include "ryu_Types.hpp"
 //#include "ryu_failsafe.h"
 
 
@@ -54,7 +56,7 @@ Health Gps::check_gps_health(const gps_data_t &m_gps)
     // 2. 신호 품질 체크 (u-blox 기준 예시)
     if (m_gps.fixType < 3)  return Health::BAD_QUALITY; // 3D Fix 미만
     if (m_gps.pDOP > 200)   return Health::BAD_QUALITY; // HDOP > 2.0 (단위 0.01)
-    if (m_gps.sats < 8)     return Health::BAD_QUALITY; // 위성 수 부족
+    if (m_gps.numSat < 8)     return Health::BAD_QUALITY; // 위성 수 부족
 
     return Health::HEALTHY;
 }
@@ -90,7 +92,7 @@ uint8_t Gps::checkDataReliability(ubx_nav_pvt_t *pvt)
     uint8_t confirmed = (pvt->flags2 & 0x03);
 
     // 4. 수평 정확도 필터 (예: 5m 이내일 때만 '최상'으로 간주)
-    bool accurate = (pvt->hAcc < 5000);
+    bool accurate = (pvt->horAcc < 5000);
 
     if (fixOk && timeOk && (confirmed >= 1) && accurate) {
         return 2; // 매우 신뢰할 수 있음
@@ -100,6 +102,68 @@ uint8_t Gps::checkDataReliability(ubx_nav_pvt_t *pvt)
     return 0; // 신뢰 불가
 }
 
+
+void Gps::gpsUbxData_To_gpsUserData(ubx_nav_pvt_t gpsUbx, gps_data_t gpsUser){
+
+    // 위성 및 상태 정보
+    gpsUser.iTOW = gpsUbx.iTOW;
+    // 1. 날짜 및 시간 (YYYYMMDD 형식 예시)
+    uint8_t status = this->checkDataReliability(&gpsUbx);
+    if (status >= 1) { // 최소 시간/날짜는 유효함
+        gpsUser.date = (gpsUbx.year * 10000) + (gpsUbx.month * 100) + gpsUbx.day;
+        // ... 시간 저장 ...
+    }
+    // UTC 시간 (HHMMSS.ss 형식으로 변환)
+    gpsUser.utc_time = (float)gpsUbx.hour * 10000.0f + (float)gpsUbx.min * 100.0f + (float)gpsUbx.sec + (gpsUbx.nano / 1000000000.0f);
+
+    if (status == 2) { // 위치 고정 및 안정화 완료
+        gpsUser.lon = (double)gpsUbx.lon / 1e7;
+        gpsUser.lat = (double)gpsUbx.lat / 1e7;
+        // ... 고도 및 속도 저장 ...
+    }
+    
+    gpsUser.numSat  = gpsUbx.numSat;
+    gpsUser.pDOP  = static_cast<float>(gpsUbx.pDOP) / 100.0f; // UBX는 pDOP을 제공 (Scaling 0.01)
+    gpsUser.fixType = gpsUbx.fixType; // 3D Fix 이상일 때 true
+    //gps->Gps_status = gps->check_gps_health(gps->share_gps);
+    
+    float current_msl_alt = (float)gpsUbx.horMSL ;
+    
+    // 홈 고도가 설정되지 않았고(-9000 미만), 수평 오차가 2m 이내일 때만 평균 계산 시작
+    if (gpsUser.home_alt < -9000.0f && gpsUbx.horAcc < 2000) {
+        gpsUser.home_alt = current_msl_alt;
+        //ESP_LOGI("GPS", "Home Alt Set: %.2f m (hAcc: %lu mm)", share_gps.home_alt, pvt->hAcc);
+    }
+
+    // 5. 속도 정보 (mm/s -> cm/s 변환)
+    // PVT 메시지는 velN, velE, velD를 mm/s로 제공하므로 10으로 나눕니다.
+    gpsUser.velNorth = static_cast<int16_t>(gpsUbx.velNorth / 10); // cm/s
+    gpsUser.velEast  = static_cast<int16_t>(gpsUbx.velEast / 10); // cm/s
+    gpsUser.velDown  = static_cast<int16_t>(gpsUbx.velDown / 10); // cm/s
+ 
+    // 지면 속도 (mm/s -> cm/s)
+    gpsUser.gndSpeed = static_cast<uint16_t>(gpsUbx.gndSpeed / 10); 
+ 
+    // 이동 방향 (Degree * 10^-5 -> Centi-Degree)
+    // 예: 180.50도 -> 18050
+    gpsUser.headMotion = static_cast<uint16_t>(gpsUbx.headMotion / 1000); 
+ 
+    // 6. 자기 편차 (Magnetic Variation)
+    // UBX-NAV-PVT의 magDec 값을 사용 (Scaling 0.01)
+    gpsUser.magDec   = static_cast<float>(gpsUbx.magDec) * 0.01f;
+    gpsUser.verAcc   = gpsUbx.verAcc;
+    gpsUser.horAcc   = gpsUbx.horAcc;
+    gpsUser.speedAcc = gpsUbx.speedAcc;
+    gpsUser.height   = gpsUbx.height;
+    gpsUser.horMSL   = gpsUbx.horMSL;
+
+    //check_gps_health(share_gps);
+    gpsUser.last_update_tick = xTaskGetTickCount();
+    
+}
+
+
+
 void Gps::gps_ubx_mode_task(void *pvParameters)
 {
     uint8_t data;
@@ -108,15 +172,14 @@ void Gps::gps_ubx_mode_task(void *pvParameters)
     uint8_t payload_idx = 0;
     uint8_t ck_a = 0, ck_b = 0;
     uint16_t msg_len = 0;
- 
-    auto xLastWakeTime = xTaskGetTickCount();
-    const auto xFrequency = pdMS_TO_TICKS(50); // 1 loop에 50ms  x 20번 = 1000ms = 1 second
 
     auto gps = static_cast<Gps*>(pvParameters);
 
     gps->share_gps.home_alt = -9999.0f;
     gps->share_gps.last_update_tick = xTaskGetTickCount();
  
+    const auto xFrequency = pdMS_TO_TICKS(50); // 1 loop에 50ms  x 20번 = 1000ms = 1 second    
+    auto xLastWakeTime = xTaskGetTickCount();
     while (true) {
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
         
@@ -155,8 +218,9 @@ void Gps::gps_ubx_mode_task(void *pvParameters)
                         break;
                     case 8: // Checksum B
                         if (data == ck_b) {
+
                             // 성공! 데이터를 구조체로 복사
-                            ubx_nav_pvt_t *pvt = (ubx_nav_pvt_t *)payload;
+                            ubx_nav_pvt_t* pvt = (ubx_nav_pvt_t *)payload;
                             
                             // 만약 같은 시간의 데이터이면 무시....
                             if (gps->share_gps.iTOW == pvt->iTOW){
@@ -164,78 +228,74 @@ void Gps::gps_ubx_mode_task(void *pvParameters)
                                 break;
                             }
                             // 만약 마지막 복사 시점으로부터 1초 이상 지났다면 'GPS 연결 끊김' 상태로 전송
-                            // if (xTaskGetTickCount() - share_gps.last_update_tick > pdMS_TO_TICKS(2000)) {
-                            //     xTaskNotify(ERR::xErrorHandle, ERR::ERR_GPS_TIMEOUT, eSetBits);
-                            //     share_gps.last_update_tick = xTaskGetTickCount();
-                            //     state =0;
-                            //     break;
-                            // }
-
-                            if (xSemaphoreTake(gps->xGpsMutex, pdMS_TO_TICKS(10)) == pdTRUE) {                                
-                                // 위성 및 상태 정보
-                                gps->share_gps.sats  = pvt->numSV;
-                                gps->share_gps.pDOP  = static_cast<float>(pvt->pDOP) / 100.0f; // UBX는 pDOP을 제공 (Scaling 0.01)
-                                gps->share_gps.fixType = pvt->fixType; // 3D Fix 이상일 때 true
-                            
-                                gps->Gps_status = gps->check_gps_health(gps->share_gps);
-
-
-                                gps->share_gps.iTOW = pvt->iTOW;
-                                // 신뢰도 통합 체크
-                                uint8_t status = gps->checkDataReliability(pvt);
-
-                                if (status >= 1) { // 최소 시간/날짜는 유효함
-                                    gps->share_gps.date = (pvt->year * 10000) + (pvt->month * 100) + pvt->day;
-                                    // ... 시간 저장 ...
-                                }
-
-                                if (status == 2) { // 위치 고정 및 안정화 완료
-                                    gps->share_gps.lon = (double)pvt->lon / 1e7;
-                                    gps->share_gps.lat = (double)pvt->lat / 1e7;
-                                    // ... 고도 및 속도 저장 ...
-                                }
-
-                                // 1. 날짜 및 시간 (YYYYMMDD 형식 예시)
-                                gps->share_gps.date = (pvt->year * 10000) + (pvt->month * 100) + pvt->day;
-                                // UTC 시간 (HHMMSS.ss 형식으로 변환)
-                                gps->share_gps.utc_time = (float)pvt->hour * 10000.0f + (float)pvt->min * 100.0f + (float)pvt->sec + (pvt->nano / 1000000000.0f);
-                                
-                                float current_msl_alt = (float)pvt->hMSL ;
-                                
-                                // 홈 고도가 설정되지 않았고(-9000 미만), 수평 오차가 2m 이내일 때만 평균 계산 시작
-                                if (gps->share_gps.home_alt < -9000.0f && pvt->hAcc < 2000) {
-                                    gps->share_gps.home_alt = current_msl_alt;
-                                    //ESP_LOGI("GPS", "Home Alt Set: %.2f m (hAcc: %lu mm)", share_gps.home_alt, pvt->hAcc);
-                                }
-
-                                // 5. 속도 정보 (mm/s -> cm/s 변환)
-                                // PVT 메시지는 velN, velE, velD를 mm/s로 제공하므로 10으로 나눕니다.
-                                gps->share_gps.velN = static_cast<int16_t>(pvt->velN / 10); // cm/s
-                                gps->share_gps.velE = static_cast<int16_t>(pvt->velE / 10); // cm/s
-                                gps->share_gps.velD = static_cast<int16_t>(pvt->velD / 10); // cm/s
-                                // 지면 속도 (mm/s -> cm/s)
-                                gps->share_gps.gSpeed = static_cast<uint16_t>(pvt->gSpeed / 10); 
-                                // 이동 방향 (Degree * 10^-5 -> Centi-Degree)
-                                // 예: 180.50도 -> 18050
-                                gps->share_gps.headMot = static_cast<uint16_t>(pvt->headMot / 1000); 
-                                // 6. 자기 편차 (Magnetic Variation)
-                                // UBX-NAV-PVT의 magDec 값을 사용 (Scaling 0.01)
-                                gps->share_gps.magDec = static_cast<float>(pvt->magDec) * 0.01f;
-                                gps->share_gps.vAcc  = pvt->vAcc;
-                                gps->share_gps.hAcc  = pvt->hAcc;
-                                gps->share_gps.sAcc  = pvt->sAcc;
-                                gps->share_gps.height = pvt->height;
-                                gps->share_gps.hMSL  = pvt->hMSL;
-
-                                //check_gps_health(share_gps);
+                            if (xTaskGetTickCount() - gps->share_gps.last_update_tick > pdMS_TO_TICKS(2000)) {
+                                //xTaskNotify(ERR::xErrorHandle, ERR::ERR_GPS_TIMEOUT, eSetBits);
                                 gps->share_gps.last_update_tick = xTaskGetTickCount();
-                                xSemaphoreGive(gps->xGpsMutex);
+                                state =0;
+                                break;
                             }
-                                //printf("Lat: %ld, Lon: %ld, Sats: %d\n", pvt->lat, pvt->lon, pvt->numSV);
-                        }
+
+                            // 위성 및 상태 정보
+                            gps->share_gps.numSat  = pvt->numSat;
+                            gps->share_gps.pDOP  = static_cast<float>(pvt->pDOP) / 100.0f; // UBX는 pDOP을 제공 (Scaling 0.01)
+                            gps->share_gps.fixType = pvt->fixType; // 3D Fix 이상일 때 true
+                        
+                            gps->Gps_status = gps->check_gps_health(gps->share_gps);
+
+
+                            gps->share_gps.iTOW = pvt->iTOW;
+                            // 신뢰도 통합 체크
+                            uint8_t status = gps->checkDataReliability(pvt);
+
+                            if (status >= 1) { // 최소 시간/날짜는 유효함
+                                gps->share_gps.date = (pvt->year * 10000) + (pvt->month * 100) + pvt->day;
+                                // ... 시간 저장 ...
+                            }
+
+                            if (status == 2) { // 위치 고정 및 안정화 완료
+                                gps->share_gps.lon = (double)pvt->lon / 1e7;
+                                gps->share_gps.lat = (double)pvt->lat / 1e7;
+                                // ... 고도 및 속도 저장 ...
+                            }
+
+                            // 1. 날짜 및 시간 (YYYYMMDD 형식 예시)
+                            gps->share_gps.date = (pvt->year * 10000) + (pvt->month * 100) + pvt->day;
+                            // UTC 시간 (HHMMSS.ss 형식으로 변환)
+                            gps->share_gps.utc_time = (float)pvt->hour * 10000.0f + (float)pvt->min * 100.0f + (float)pvt->sec + (pvt->nano / 1000000000.0f);
+                            
+                            float current_msl_alt = (float)pvt->horMSL ;
+                            
+                            // 홈 고도가 설정되지 않았고(-9000 미만), 수평 오차가 2m 이내일 때만 평균 계산 시작
+                            if (gps->share_gps.home_alt < -9000.0f && pvt->horAcc < 2000) {
+                                gps->share_gps.home_alt = current_msl_alt;  // GPS에서 보는 현재위치의 고도 저장
+                            }
+
+                            // 5. 속도 정보 (mm/s -> cm/s 변환)
+                            // PVT 메시지는 velN, velE, velD를 mm/s로 제공하므로 10으로 나눕니다.
+                            gps->share_gps.velNorth = static_cast<int16_t>(pvt->velNorth / 10); // cm/s
+                            gps->share_gps.velEast  = static_cast<int16_t>(pvt->velEast / 10); // cm/s
+                            gps->share_gps.velDown  = static_cast<int16_t>(pvt->velDown / 10); // cm/s
+                            // 지면 속도 (mm/s -> cm/s)
+                            gps->share_gps.gndSpeed = static_cast<uint16_t>(pvt->gndSpeed / 10); 
+                            // 이동 방향 (Degree * 10^-5 -> Centi-Degree)
+                            // 예: 180.50도 -> 18050
+                            gps->share_gps.headMotion = static_cast<uint16_t>(pvt->headMotion / 1000); 
+                            // 6. 자기 편차 (Magnetic Variation)
+                            // UBX-NAV-PVT의 magDec 값을 사용 (Scaling 0.01)
+                            gps->share_gps.magDec   = static_cast<float>(pvt->magDec) * 0.01f;
+                            gps->share_gps.verAcc   = pvt->verAcc;
+                            gps->share_gps.horAcc   = pvt->horAcc;
+                            gps->share_gps.speedAcc = pvt->speedAcc;
+                            gps->share_gps.height   = pvt->height;
+                            gps->share_gps.horMSL   = pvt->horMSL;
+
+                            //check_gps_health(gps->share_gps);
+                            gps->share_gps.last_update_tick = xTaskGetTickCount();
+                            }
+                        
                         state = 0;
                         break;
-                }
+                } // switch
             }
         }
     }

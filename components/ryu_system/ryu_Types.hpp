@@ -209,4 +209,3 @@ struct BaroData {
     bool is_updated;
 };
 
-

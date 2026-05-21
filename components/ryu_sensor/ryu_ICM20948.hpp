@@ -14,10 +14,19 @@ namespace Sensor{
 
 class ICM20948 : public Interface::IImuSensor{
     private:
+        ICM20948()= default;
         static constexpr const char* TAG = "ICM20948";
     public:
-        ICM20948();
+        static ICM20948& getInstance() {
+            static ICM20948 instance;
+            return instance;
+        }
+        // 싱글톤 패턴: 복사 및 이동 방지
+        ICM20948(const ICM20948&) = delete;
+        ICM20948& operator=(const ICM20948&) = delete;
         ~ICM20948();
+
+
         static inline constexpr uint8_t ADDR_VCC = 0x69;
         static inline constexpr uint8_t ADDR_GND = 0x68;
         

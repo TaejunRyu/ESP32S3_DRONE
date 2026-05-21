@@ -446,7 +446,7 @@ void Mavlink::MAV_CMD_NAV_TAKEOFF_func(mavlink_message_t *msg, mavlink_command_l
 
 void Mavlink::MAV_CMD_DO_SET_HOME_func(mavlink_message_t *msg, mavlink_command_long_t cmd){
     send_mav_command_ack(cmd.command, MAV_RESULT_ACCEPTED,0,0,msg->sysid,msg->compid);
-    auto& gps = Sensor::Gps::get_instance();
+    auto& gps = Sensor::Gps::getInstance();
     if (cmd.param1 == 1){
         // Param 1이 1이면 현재 센서(GPS) 위치를 홈으로 설정
         // ENV::qgc_home_pos.lat = gps.share_gps.lat;
@@ -671,7 +671,7 @@ void Mavlink::on_timer_tick()
             // 정확한 데이터 보장이 필요하기 때문에 시간별 다름을 없애는 목적......
             // gps시간이 다르면 복사하고 아니면 이전 데이터 사용
 
-            auto& gps = Sensor::Gps::get_instance();
+            auto& gps = Sensor::Gps::getInstance();
          //   if (xSemaphoreTake(gps.xGpsMutex, 0 )== pdTRUE) { 
                 if (gps.share_gps.iTOW != last_itow){
                     m_gps       = gps.share_gps;
@@ -752,16 +752,16 @@ void Mavlink::on_timer_tick()
                         m_gps.fixType,                              // 실제 Fix 타입을 그대로 전달 (0~4)                     
                         static_cast<int32_t>(m_gps.lat * 1e7),      // 위도
                         static_cast<int32_t>(m_gps.lon * 1e7),      // 경도
-                        static_cast<int32_t>(m_gps.hMSL), // 해발 고도 (MSL, mm)
+                        static_cast<int32_t>(m_gps.horMSL), // 해발 고도 (MSL, mm)
                         static_cast<uint16_t>(m_gps.pDOP),          
                         static_cast<uint16_t>(m_gps.pDOP),          // VDOP 대신 pDOP 사용 가능
-                        static_cast<uint16_t>(m_gps.gSpeed),        // 지표속도
-                        static_cast<uint16_t>(m_gps.headMot),       // 이동방향
-                        static_cast<uint8_t>(m_gps.sats),           // 위성수
+                        static_cast<uint16_t>(m_gps.gndSpeed),        // 지표속도
+                        static_cast<uint16_t>(m_gps.headMotion),       // 이동방향
+                        static_cast<uint8_t>(m_gps.numSat),           // 위성수
                         static_cast<int32_t>(m_gps.height),         // alt_ellipsoid (mm 단위 그대로)
-                        m_gps.hAcc,                                 // 수평 정확도 (mm)
-                        m_gps.vAcc,                                 // 수직 정확도 (mm)
-                        m_gps.sAcc,                                 // 속도 정확도 (mm/s)
+                        m_gps.horAcc,                                 // 수평 정확도 (mm)
+                        m_gps.verAcc,                                 // 수직 정확도 (mm)
+                        m_gps.speedAcc,                                 // 속도 정확도 (mm/s)
                         0,                                          // hdg_acc – [degE5] Heading / track uncertainty
                         static_cast<uint16_t>(attitude.yaw * 100.0f) // yaw (cdeg 단위로 변환)
                     );
@@ -772,10 +772,10 @@ void Mavlink::on_timer_tick()
         case 1: case 8:{
             //if (m_gps.home_alt > -9000.0f && m_gps.fixType >= 3) {
                 //현재고도
-                int32_t alt_msl = static_cast<int32_t>(m_gps.hMSL );
+                int32_t alt_msl = static_cast<int32_t>(m_gps.horMSL );
                 
                 // 상대 고도 (Relative) mm 단위
-                int32_t alt_rel = static_cast<int32_t>((m_gps.hMSL - m_gps.home_alt) );
+                int32_t alt_rel = static_cast<int32_t>((m_gps.horMSL - m_gps.home_alt) );
                 
                 mavlink_msg_global_position_int_pack(
                     ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, esp_timer_get_time()/1000,
@@ -784,9 +784,9 @@ void Mavlink::on_timer_tick()
                     static_cast<int32_t>(alt_msl),      // 해수면 고도
 //                    static_cast<int32_t>(ENV::g_altitude.current),      // 이것은 기압계로 측정한 고도 => g_baro.filtered_altitude * 1000.0f),
                     static_cast<int32_t>(alt_rel),      // 이것은 기압계로 측정한 고도 => g_baro.filtered_altitude * 1000.0f),
-                    static_cast<int16_t>(m_gps.velN),   // 단위(cm/s) gps에서 데이터를 받아 처리 VGT문장에서 받으면 된다.
-                    static_cast<int16_t>(m_gps.velE),
-                    static_cast<int16_t>(m_gps.velD),
+                    static_cast<int16_t>(m_gps.velNorth),   // 단위(cm/s) gps에서 데이터를 받아 처리 VGT문장에서 받으면 된다.
+                    static_cast<int16_t>(m_gps.velEast),
+                    static_cast<int16_t>(m_gps.velDown),
                     static_cast<int16_t>(attitude.yaw * 100.0f)
                 );
 

@@ -10,30 +10,25 @@
 
 #pragma once
 #include "ryu_Types.hpp"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h" // 💡 Task Notification 핸들 관리를 위한 헤더 포함
 #include <atomic> 
 
 namespace Utils {
 
 enum class Data_type{
-    DT_IMU_DATA,
-    DT_BARO_DATA,
-    DT_MAG_DATA,
-    DT_CURRENT_ATTITUDE,
-    DT_TARGET_ATTITUDE
+    DT_IMU_DATA,            // ACCEL,GYRO
+    DT_BARO_DATA,           // BARO
+    DT_MAG_DATA,            // MAG
+    DT_CURRENT_ATTITUDE,    // 
+    DT_TARGET_ATTITUDE,
+    DT_GPS_DATA
 };
-
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// 이것으로 교체 해 볼만하다....
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // 트레이츠 매핑 등록
 template <Data_type T> struct DataTypeTraits;
-template <> struct DataTypeTraits<Data_type::DT_IMU_DATA>  { using Type = SensorData; };
-template <> struct DataTypeTraits<Data_type::DT_BARO_DATA> { using Type = BaroData; };
-template <> struct DataTypeTraits<Data_type::DT_CURRENT_ATTITUDE> { using Type = Attitude_t; };
-template <> struct DataTypeTraits<Data_type::DT_TARGET_ATTITUDE> { using Type = Attitude_t; };
+template <> struct DataTypeTraits<Data_type::DT_IMU_DATA>           { using Type = SensorData; };
+template <> struct DataTypeTraits<Data_type::DT_BARO_DATA>          { using Type = BaroData; };
+template <> struct DataTypeTraits<Data_type::DT_CURRENT_ATTITUDE>   { using Type = Attitude_t; };
+template <> struct DataTypeTraits<Data_type::DT_TARGET_ATTITUDE>    { using Type = Attitude_t; };
 
 class SharedDataManager {
 private:
@@ -55,7 +50,7 @@ private:
     std::atomic<int> _taratt_latest_idx{0};
 
 
-   // 부팅 후 0점 교정이 완벽히 완료되었는지 동기화를 보장하는 전역 플래그
+    // 부팅 후 0점 교정이 완벽히 완료되었는지 동기화를 보장하는 전역 플래그
     std::atomic<bool> _is_imu_calibrated;
     //Core 0와 Core 1을 연결하는 동기화 배턴용 비행 태스크 핸들 원자적 보관소
     std::atomic<TaskHandle_t> _flight_task_handle;
@@ -117,25 +112,13 @@ public:
     }
 
 
-    // --- 5. IMU 캘리브레이션 플래그 창구 ---
-    void set_imu_calibrated(bool state) {
-        _is_imu_calibrated.store(state, std::memory_order_release);
-    }
+    // ACCEL,GYRO의 CALIBRATION이 되었는가 확인
+    void set_imu_calibrated(bool state) {_is_imu_calibrated.store(state, std::memory_order_release);}
+    bool is_imu_calibrated() { return _is_imu_calibrated.load(std::memory_order_acquire);}
 
-    bool is_imu_calibrated() {
-        return _is_imu_calibrated.load(std::memory_order_acquire);
-    }
-
-    // --- 6. 💡 [새로운 중계 기능] 비행 태스크 핸들 중앙 집중 등록 창구 ---
-    // main.cpp에서 flight_task를 생성한 후 이 함수로 등록합니다.
-    void register_flight_task_handle(TaskHandle_t handle) {
-        _flight_task_handle.store(handle, std::memory_order_release);
-    }
-
-    // Core 0 (센서 태스크)에서 데이터를 다 채운 후 이 핸들을 꺼내 깨우는 신호를 던집니다.
-    TaskHandle_t get_flight_task_handle() {
-        return _flight_task_handle.load(std::memory_order_acquire);
-    }
+    // Flight_task handle
+    void register_flight_task_handle(TaskHandle_t handle) {_flight_task_handle.store(handle, std::memory_order_release);}
+    TaskHandle_t get_flight_task_handle() {return _flight_task_handle.load(std::memory_order_acquire);}
 };
 
 

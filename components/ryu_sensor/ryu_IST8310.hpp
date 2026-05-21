@@ -16,10 +16,18 @@ namespace Sensor
 
 class IST8310  : public Interface::IImuSensor{
     private:
+        IST8310()= default;
         static constexpr const char* TAG = "IST8310";
     public:
-        IST8310();
+        static IST8310& getInstance() {
+            static IST8310 instance;
+            return instance;
+        }
+        // 싱글톤 패턴: 복사 및 이동 방지
+        IST8310(const IST8310&) = delete;
+        IST8310& operator=(const IST8310&) = delete;
         ~IST8310();
+        
         static inline constexpr uint8_t ADDR       =    0x0E; // 기본 주소 (ADR핀 상태에 따라 다를 수 있음)
 
         // 인터페이스 주입 (핵심!)

@@ -62,7 +62,7 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
     SensorTask* task = static_cast<SensorTask*>(pvParameters);
 
     // 1. SPI 드라이버 및 인터페이스 초기화
-    Driver::SPI& spi = Driver::SPI::get_instance();
+    Driver::SPI& spi = Driver::SPI::getInstance();
     spi.initialize();
 
     //Driver::I2C& i2c = Driver::I2C::get_instance();
@@ -73,7 +73,7 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
 
 
     // 동적 할당 및 NULL 포인터 검증 예외 처리
-    task->_icm20948 = new (std::nothrow) Sensor::ICM20948();
+    task->_icm20948 = &Sensor::ICM20948::getInstance();
     if (task->_icm20948 == nullptr) {
         ESP_LOGE(TAG, "치명적 오류: IMU 메모리 할당 실패! 시스템을 정지합니다.");
         if (spi_interface != nullptr) {
