@@ -12,6 +12,7 @@
 #include "ryu_espnow.hpp"
 #include "ryu_mavlink.hpp"
 #include "ryu_timer.hpp"
+#include "ryu_battery.hpp"
 
 namespace Controller {
 Flight::Flight() : _taskHandle(nullptr)
@@ -19,6 +20,9 @@ Flight::Flight() : _taskHandle(nullptr)
 }
 
 esp_err_t Flight::initialize(){
+
+    Driver::Battery::get_instance().initialize();
+
     return ESP_OK;
 }
 

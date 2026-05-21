@@ -17,7 +17,7 @@
 // #include "ryu_buzzer.h"
 // #include "ryu_config.h"
 #include "ryu_gps.hpp"
-// #include "ryu_battery.h"
+#include "ryu_battery.hpp"
 // #include "ryu_flight_task.h"
 // #include "ryu_flight_event.h"
 // #include "ryu_utils.h"
@@ -698,23 +698,29 @@ void Mavlink::on_timer_tick()
             // 1. CPU Load 계산 (0 ~ 1000 사이의 값으로 변환)
             // 로그상 1700us / 2500us 라면 약 680이 됨
             // auto& flight = Controller::Flight::get_instance();
-            uint16_t load =0;// (uint16_t)((flight.total_us * 1000) / Controller::Flight::INTERVAL_US);
-            
-            // auto& bat = Driver::Battery::get_instance();
+            //uint16_t load = (uint16_t)((flight.total_us * 1000) / LOOP_TIME);
+            // Flight의 정보를 가져와서 출력.
+            uint16_t load = ( 600.0f * 1000.0f) / LOOP_TIME;
+            auto& bat = Driver::Battery::get_instance();
             // 2. 배터리 가짜 데이터 (12.6V, 10.5A, 85% 잔량)
-            uint16_t battery_voltage = 0;//(uint16_t)(bat.get_battery_voltage() * 1000.0f); //mv
-            int16_t current_battery = 1050;   // [10mA 단위, 즉 10.5A]
-            int8_t battery_remaining = 85;    // [%]
-            uint16_t comms_drop_rate = 0;     // 통신 패킷 드랍률 (0.01% 단위)
-            uint16_t comms_errors = 0;        // 통신 에러 횟수
+            uint16_t battery_voltage    = (uint16_t)(bat.get_battery_voltage() * 1000.0f); //mv
+            int16_t  current_battery    = 1050;   // [10mA 단위, 즉 10.5A]
+            int8_t   battery_remaining  = 85;    // [%]
+            uint16_t comms_drop_rate    = 0;     // 통신 패킷 드랍률 (0.01% 단위)
+            uint16_t comms_errors       = 0;        // 통신 에러 횟수
             
             // 시스템 상태 패킷 구성 예시
             mavlink_msg_sys_status_pack(
                 ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, 
-                sensors_present, sensors_enabled, sensors_health,         // 센서 상태 비트마스크
+                sensors_present, 
+                sensors_enabled, 
+                sensors_health,         // 센서 상태 비트마스크
                 load,        // CPU Load (0~1000)
-                battery_voltage, current_battery, battery_remaining, 
-                comms_drop_rate, comms_errors, 0, 0, 0, 0,0,0,0
+                battery_voltage, 
+                current_battery, 
+                battery_remaining, 
+                comms_drop_rate, 
+                comms_errors, 0, 0, 0, 0,0,0,0
             );
             send_mavlink_msg(&msg);
             break;
