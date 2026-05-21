@@ -13,7 +13,7 @@ namespace Interface{
 
 namespace Sensor{
 
-class BMP388 : public ISensor{
+class BMP388{
     private:
         BMP388()= default;
         static constexpr const char* TAG = "BMP388";
@@ -32,23 +32,21 @@ class BMP388 : public ISensor{
         void set_bus(Interface::IBus* bus);
         Interface::IBus* get_bus(){ return _ibus;};    
 
-        
+        // I2C 연결시 사용
         static inline constexpr uint8_t ADDR_VCC   =   0x77;
         static inline constexpr uint8_t ADDR_GND   =   0x76;
 
-        esp_err_t updateSample(SensorData& sample) override;
-        esp_err_t initialize() override;
-        esp_err_t deinitialize() override;
+        
+        esp_err_t initialize() ;
+        esp_err_t deinitialize();
 
-        void setStatus(bool status) { _isAlive = status; }
-        bool getStatus() { return _isAlive; }
         bool is_initialized(){return _initialized;};
 
         esp_err_t calibrate_ground_pressure(float *ground_pressure);
         float get_ground_pressure(){return _ground_pressure;};
         esp_err_t get_relative_altitude(float *filtered_alt);
         float get_climb_rate() { return _climb_rate; };
-        esp_err_t Managed_get_relative_altitude(float *return_alt, float *return_rate);
+        bool is_data_ready();
 
     private:
         Interface::IBus* _ibus = nullptr;
@@ -91,19 +89,13 @@ class BMP388 : public ISensor{
         uint32_t    adc_p_last = 0, 
                     adc_t_last = 0;
                     
-        float update_climb_rate();
-        bool is_data_ready();
+        void update_climb_rate();
         void init_coefficients();
         esp_err_t  read_calib();
-        esp_err_t read_bmp388(uint32_t *adcp, uint32_t *adct);
+        inline esp_err_t read_bmp388(uint32_t *adcp, uint32_t *adct);
         esp_err_t get_pressure(float *pressure);        
        
         bool _initialized = false;
-        std::string _name {};
-        bool _isAlive = false;
-        // private 생성자: 외부에서 호출 불가
-
-        BMP388(std::string n) : _name(n), _isAlive(true) {}
     };
 
 }

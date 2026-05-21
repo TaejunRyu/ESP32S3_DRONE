@@ -1,55 +1,72 @@
 #include "ryu_BaroSensorTask.hpp"
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
-#include "esp_timer.h"
-#include "ryu_Types.hpp"
-#include "ryu_ICM20948.hpp"
-#include "ryu_SharedDataManager.hpp"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <esp_log.h>
+#include <esp_timer.h>
 
+#include "ryu_Types.hpp"
+#include "ryu_spi.hpp"
+#include "ryu_BMP388.hpp"
+#include "ryu_BusInterface.hpp"
+#include "ryu_SharedDataManager.hpp"
 
 namespace Controller {
 
-void BaroTask::ReadBaroTask(void* pvParameters) {
-    //BaroTask* task = static_cast<BaroTask*>(pvParameters);
+void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
+    // 1. SPI 드라이버 및 인터페이스 초기화
+    Driver::SPI& spi = Driver::SPI::getInstance();
+    spi.initialize();
     
+    Interface::IBus* spi_interface = Interface::createBIF(spi.get_host(), SPI_CS_PIN);
+
+    auto& bmp388 = Sensor::BMP388::getInstance();
+    bmp388.set_bus(spi_interface);
+    bmp388.initialize();
+
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(20); // 50Hz = 20ms 주기 작동
 
+    float filtered_alt{};
+    float clib_rate{};
+    float gnd_pressure {};
+    BaroData baro_buf {};
+
     while (true) {
-        // [단계 1] 센서칩에 "압력 측정 시작해라" 명령 송신 (대기 없음)
-        //task->_baro_sensor->trigger_pressure_measurement();
-
-        // [단계 2] ★ 하드웨어 변환 대기 시간 확보 (예: 9ms)
-        // 이 동안 vTaskDelay가 작동하여 CPU 제어권이 최상위 권한인 'SensorTask'로 넘어가므로, 
-        // 1ms IMU 리딩 타이밍에 단 1마이크로초의 방해도 주지 않습니다.
-        vTaskDelay(pdMS_TO_TICKS(9));
-
-        // [단계 3] 레지스터에서 디지털 변환이 완료된 압력 데이터 수집
-        BaroData baro_buf {};
-        // if (task->_baro_sensor->read_pressure_and_calc_alt(baro_buf) == ESP_OK) {
-        //     baro_buf.timestamp = esp_timer_get_time();
+        if (bmp388.is_data_ready()){
+            bmp388.get_relative_altitude(&filtered_alt);
+            gnd_pressure = bmp388.get_ground_pressure();
+            clib_rate = bmp388.get_climb_rate();
             
-            // [단계 4] 데이터 매니저에 안전하게 주입
-            //Utils::SharedDataManager::getinstance().update_latest_baro(baro_buf);
-            Controller::SharedDataManager::getInstance().publish_data<Data_type::DT_BARO_DATA>(baro_buf);
-        //}
+            // 로컬 구조체 바인딩 (상승률 누락 수정)
+            baro_buf.altitude = filtered_alt;
+            baro_buf.gnd_pressure = gnd_pressure;
+            baro_buf.climb_rate = clib_rate; // 🛠️ 구조체 필드가 있다면 할당 필요
+            
+            SharedDataManager::getInstance().publish_data<Data_type::DT_BARO_DATA>(baro_buf);
+            SharedDataManager::getInstance().set_baro_updated(true);
+        }
+        
         // 정확히 20ms 주기를 맞추기 위해 잔여 시간 휴식
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
 
-void BaroTask::StartTask() {
+void BaroSensorTask::StartTask() {
     xTaskCreatePinnedToCore(
-        ReadBaroTask,
-        "BaroTask",
+        ReadBaroSensorTask,
+        "ReadBaroSensorTask",
         3072,
         this,
-        configMAX_PRIORITIES - 3, // ★ 방어 설계: SENSOR_TASK보다 낮게 설정하여 우선순위 밀림 원천 차단
-        nullptr,
-        0                         // ★ 핵심: 통신 버스 분담을 위해 동일하게 Core 0번에 배치
+        configMAX_PRIORITIES - 3, // SENSOR_TASK보다 낮게 설정하여 우선순위 밀림 원천 차단
+        &_taskHandle,
+        0                         // 통신 버스 분담을 위해 Core 0번에 배치
     );
 }
 
-} // namespace Service
+esp_err_t BaroSensorTask::initialize()
+{
+    return ESP_OK; // 🛠️ 구현되지 않은 상태 방지
+}
+
+} // namespace Controller

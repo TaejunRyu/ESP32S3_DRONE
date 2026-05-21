@@ -203,10 +203,11 @@ struct SensorData {
  */
 struct BaroData {
     uint64_t timestamp;
+    float gnd_pressure;    // 기압 (hPa)
     float pressure;    // 기압 (hPa)
     float altitude;    // 계산된 상대 고도 (m)
-    float temperature;
-    bool is_updated;
+    //float temperature;
+    float climb_rate;
 };
 
         // --- GPS 사용자 데이터 ---

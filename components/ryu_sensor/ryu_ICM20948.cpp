@@ -313,8 +313,6 @@ esp_err_t ICM20948::updateSample(SensorData& sample){
             sample.acc         = data.acc  ;
             sample.gyro        = data.gyro ;
         }
-        //sample.temperature = data.temperature;
-        //sample.timestamp   = data.timestamp;
 
         if (_include_mag){
             if (data.is_mag_updated){

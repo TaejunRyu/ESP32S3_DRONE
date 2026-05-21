@@ -15,17 +15,13 @@ void BMP388::set_bus(Interface::IBus *bus)
     _ibus = bus; 
 }
 
-esp_err_t BMP388::updateSample(SensorData &sample)
-{
-    return esp_err_t();
-}
 
 esp_err_t BMP388::initialize()
 {    
     esp_err_t err = ESP_FAIL;
 
     if(_initialized){
-        ESP_LOGI(TAG,"%s Already initialized.",_name.c_str());
+        ESP_LOGI(TAG,"Already initialized.");
         return ESP_FAIL;
     }
 
@@ -34,16 +30,16 @@ esp_err_t BMP388::initialize()
     // 1. Soft Reset
     err = _ibus->Write(0x7E, 0xB6);
     if(err !=ESP_OK){ 
-        ESP_LOGI(TAG,"%s Soft Reset Failure.",_name.c_str());
+        ESP_LOGI(TAG,"Soft Reset Failure.");
         return err;
     }    
-    vTaskDelay(pdMS_TO_TICKS(100)); // 시간을 넉넉히 줍니다.
+    vTaskDelay(pdMS_TO_TICKS(50)); // 시간을 넉넉히 줍니다.
 
     // 2. 중요: 일단 Sleep Mode로 전환하여 설정을 초기화 (0x1B에 0x00)
     err = _ibus->Write(0x1B, 0x00);
 
     if(err !=ESP_OK) {
-        ESP_LOGI(TAG,"%s Sleep Mode Failure.",_name.c_str());
+        ESP_LOGI(TAG,"Sleep Mode Failure.");
         return err;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -51,7 +47,7 @@ esp_err_t BMP388::initialize()
     // 1. OSR 설정 (압력 x8, 온도 x2 권장: 0x11)
     err = _ibus->Write(0x1C, (0x03 << 0)  | (0x01 << 3));
     if(err !=ESP_OK) {
-        ESP_LOGI(TAG,"%s OSR Failure.",_name.c_str());
+        ESP_LOGI(TAG,"OSR Failure.");
         return err;
     }
     //IIR 필터 계수 (0x1F): 현재 0x02 << 1 (계수 3) 정도로 설정되어 있습니다. 
@@ -59,20 +55,20 @@ esp_err_t BMP388::initialize()
     // 2. IIR 필터 및 ODR(100Hz) 설정
     err = _ibus->Write(0x1F, 0x02<<1);
     if(err !=ESP_OK) {
-        ESP_LOGI(TAG,"%s IIR Failure.",_name.c_str());
+        ESP_LOGI(TAG,"IIR Failure.");
         return err;
     }
     // 2. ODR 설정 (100Hz로 설정하여 50Hz 읽기 루프 지원)
     err = _ibus->Write(0x1D, 0x02);
     if(err !=ESP_OK) {
-        ESP_LOGI(TAG,"%s ODR Failure.",_name.c_str());
+        ESP_LOGI(TAG,"ODR Failure.");
         return err;
     }
     // 0x13: Forced Mode, Temp EN, Press EN
     err = _ibus->Write(0x1B, 0x13);
 
     if(err !=ESP_OK) {
-        ESP_LOGI(TAG,"%s Forced Mode Failure.",_name.c_str());
+        ESP_LOGI(TAG,"Forced Mode Failure.");
         return err;
     }
     vTaskDelay(pdMS_TO_TICKS(50)); // 측정 완료 대기
@@ -80,7 +76,7 @@ esp_err_t BMP388::initialize()
     // 4. 드디어 Normal Mode 작동 (0x33)
     err = _ibus->Write(0x1B, 0x33);
     if(err !=ESP_OK) {
-        ESP_LOGI(TAG," %s Normal Mode Failure.",_name.c_str());
+        ESP_LOGI(TAG,"Normal Mode Failure.");
         return err;
     }
     // 5. 첫 측정 대기: 중요!
@@ -95,7 +91,7 @@ esp_err_t BMP388::initialize()
     }
     _initialized = true;
 
-    ESP_LOGI(TAG,"%s Initialized sucessfully.",this->_name.c_str());    
+    ESP_LOGI(TAG,"Initialized sucessfully.");    
     return err;
 }
 
@@ -125,7 +121,6 @@ esp_err_t BMP388::read_calib()
 {
     esp_err_t ret_code = ESP_FAIL;
     uint8_t d[21];
-    //ret_code = i2c_master_transmit_receive(_dev_handle, &REG_CALIB, 1, d, 21, pdMS_TO_TICKS(10));
     ret_code = _ibus->Read(REG_CALIB,d,21);
     if(ret_code != ESP_OK) return ret_code;
     // 데이터시트 Table 29: Compensation parameter storage 정밀 매핑
@@ -147,14 +142,14 @@ esp_err_t BMP388::read_calib()
 }
 
 
-float BMP388::update_climb_rate()
-{
+void BMP388::update_climb_rate(){
     // 현재 진행되어지는 고도는 fitered_alt가지고 작업 진행중...
-    float raw_rate = (this->_filtered_alt - this->_last_altitude) / 0.020f; // 50Hz = 0.020s  , 40hz = 0.025s
-    this->_last_altitude = this->_filtered_alt;
+    float raw_rate = (_filtered_alt - _last_altitude) / 0.020f; // 50Hz = 0.020s  , 40hz = 0.025s
+    
+    _last_altitude = _filtered_alt;
     // 속도 필터 (기압계 노이즈 제거용)
-    this->_climb_rate = (this->_climb_rate * 0.8f) + (raw_rate * 0.2f);
-    return this->_climb_rate;
+    _climb_rate = (_climb_rate * 0.8f) + (raw_rate * 0.2f);
+    
 }
 
 
@@ -197,8 +192,8 @@ esp_err_t BMP388::calibrate_ground_pressure(float* ground_pressure)
     }
 
     if (count >= 50) { // 최소 50개 이상의 유효 샘플 확보 시
-        this->_ground_pressure = sum / (float)count;
-        ESP_LOGI(TAG, "✓ Ground pressure setting complete: %.2f hPa (Samples: %d)", this->_ground_pressure, count);
+        _ground_pressure = sum / (float)count;
+        ESP_LOGI(TAG, "✓ Ground pressure setting complete: %.2f hPa (Samples: %d)",_ground_pressure, count);
         *ground_pressure = _ground_pressure;
         return ret_code;
     }
@@ -238,7 +233,6 @@ bool BMP388::is_data_ready()
  */
 void BMP388::init_coefficients() {
     // 여기서는 성능 걱정 없이 정확하게 계산합니다.
-    // (this->p1 등은 센서 고유의 보정 데이터)
     _p1 = ((float)_coef.p1 - 16384.0f) / 1048576.0f;
     _p2 = ((float)_coef.p2 - 16384.0f) / 536870912.0f;
     _p3 = (float)_coef.p3 / 4294967296.0f;
@@ -258,15 +252,15 @@ esp_err_t BMP388::get_pressure(float * pressure)
     uint32_t adc_p{},adc_t{}; 
     auto  ret_code = read_bmp388(&adc_p ,&adc_t);        
     if (ret_code == ESP_OK){
-        float uncomp_p = (float)adc_p;
-        float uncomp_t = (float)adc_t;
+        float uncomp_p = static_cast<float>(adc_p);
+        float uncomp_t = static_cast<float>(adc_t);
 
         // 2. 온도 보정 (정확한 지수값 사용)
-        float partial_t1 = uncomp_t - (float)_coef.t1 * 256.0f;
-        float partial_t2 = partial_t1 * (float)_coef.t2;
+        float partial_t1 = uncomp_t - static_cast<float>(_coef.t1) * 256.0f;
+        float partial_t2 = partial_t1 * static_cast<float>(_coef.t2);
         // T-Lin 값 (압력 계산의 핵심 베이스)
         float t_lin = (partial_t2 / 1073741824.0f) + 
-                    ((partial_t1 * partial_t1) * (float)_coef.t3 / 281474976710656.0f);
+                    ((partial_t1 * partial_t1) * static_cast<float>(_coef.t3) / 281474976710656.0f);
 
         // 4. 최종 압력 계산
         float s1 = _p6 * t_lin;
@@ -286,7 +280,7 @@ esp_err_t BMP388::get_pressure(float * pressure)
 
         float comp_press = partial_out1 + partial_out2 + d4;
 
-        *pressure = (float)(comp_press * 0.01f);
+        *pressure = static_cast<float>(comp_press * 0.01f);
         return ret_code; // Pa -> hPa
     } else {
         *pressure = 0.0f;
@@ -310,22 +304,22 @@ esp_err_t BMP388::get_relative_altitude(float * filtered_alt)
     }
 
     // 고도 계산 공식 (ISA 모델)
-    this->_current_alt = 44330.0f * (1.0f - powf(pressure / this->_ground_pressure, 0.190295f));
+    _current_alt = 44'330.0f * (1.0f - powf(pressure / _ground_pressure, 0.190295f));
 
     // 간단한 1차 저주파 필터 (Alpha: 0.1 ~ 0.3 권장)
     // 노이즈를 줄이고 부드러운 고도 변화를 만듭니다.
     const float alpha = 0.2f; 
-    this->_filtered_alt = (this->_current_alt * alpha) + (this->_last_altitude * (1.0f - alpha));
+    _filtered_alt = (_current_alt * alpha) + (_last_altitude * (1.0f - alpha));
     
-    this->_last_altitude = this->_filtered_alt;
+    _last_altitude = _filtered_alt;
 
-    this->update_climb_rate();
+    update_climb_rate();
     *filtered_alt = _filtered_alt;
     return ret_code;
 }
 
 
-inline esp_err_t BMP388::read_bmp388(uint32_t* adcp,uint32_t* adct){
+esp_err_t BMP388::read_bmp388(uint32_t* adcp,uint32_t* adct){
     uint8_t d[6] = {0};
     // 데이터 읽기 실패 시 0 반환
     esp_err_t ret_code  = _ibus->Read(REG_DATA,d,6);

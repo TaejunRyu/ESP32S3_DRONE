@@ -1,24 +1,41 @@
 #pragma once
 
-namespace Sensor{
-    class ICM20948;
-}
-namespace Utils{
-    class ImuCalibrator;
-}
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <esp_err.h>
 
+namespace Sensor{
+    class BMP388;
+}
 
 namespace Controller{
 
-class BaroTask{
-    private:
-        static constexpr const char* TAG = "BaroTask";
-
-
-
+class BaroSensorTask{
+         BaroSensorTask() = default; 
+        ~BaroSensorTask() = default;
+        static constexpr const char* TAG = "BaroSensorTask";
     public:
-        static void ReadBaroTask(void *pvParameters);
+        static BaroSensorTask& getInstance() {
+            static BaroSensorTask instance; 
+            return instance;
+        }
+        BaroSensorTask(const BaroSensorTask&) = delete;
+        BaroSensorTask& operator=(const BaroSensorTask&) = delete;
+        BaroSensorTask(BaroSensorTask&&) = delete;
+        BaroSensorTask& operator=(BaroSensorTask&&) = delete;
+        // bmp388 cs pin
+        inline static constexpr int SPI_CS_PIN = 10;
+        static void ReadBaroSensorTask(void *pvParameters);
         void StartTask();
+
+        bool is_initialized(){return _initialized;};
+        esp_err_t initialize(); 
+        TaskHandle_t getTaskHandle(){return _taskHandle;};
+
+    private:
+        TaskHandle_t _taskHandle = nullptr;
+        bool _initialized = false;
+
 };
 }
 

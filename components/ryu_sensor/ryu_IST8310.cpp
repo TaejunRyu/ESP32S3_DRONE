@@ -104,10 +104,7 @@ esp_err_t IST8310::deinitialize()
     return ESP_OK; 
 }
 
-
-
-
-esp_err_t IST8310::updateSample(SensorData &sample)
+esp_err_t IST8310::updateSample(Vector3f &sample)
 {
       // 1. 하드웨어 버스 연결 상태 방어적 체크
     if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        
@@ -117,18 +114,34 @@ esp_err_t IST8310::updateSample(SensorData &sample)
     
     // 2. 통신이 완벽하게 성공한 경우에만 상위 객체로 데이터 복사
     if (err == ESP_OK){
-        sample.mag    = (data -_mag_offset) * _mag_scale;
-        _mag_previous =sample.mag;   //정상으로 읽었을때 자료 보관.       
-        sample.is_mag_updated = true;
+        sample    = (data -_mag_offset) * _mag_scale;
+        _mag_previous =sample;   //정상으로 읽었을때 자료 보관.       
+        //sample.is_mag_updated = true;
     }else{
-        sample.is_mag_updated = false;
-        sample.mag = _mag_previous;
+        //sample.is_mag_updated = false;
+        sample = _mag_previous;
     }
     return err;
 }
 
+bool IST8310::is_data_ready()
+{  
+    // 1. 센서 인터페이스 주입 확인 및 초기화 여부 검사
+    if (_ibus == nullptr || !_initialized) {
+        return false;
+    }
+    uint8_t status_reg = 0;
+    // 2. IBus 인터페이스를 통해 STAT1(0x02) 레지스터 1바이트 읽기
+    esp_err_t err = _ibus->Read(STAT1, &status_reg, 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read STAT1 register: %s", esp_err_to_name(err));
+        return false;
+    }
+    return (status_reg & STAT1_DRDY_MASK) != 0;
+}
 
-esp_err_t IST8310::read_data(Vector3f data){
+esp_err_t IST8310::read_data(Vector3f data)
+{
 
     uint8_t rx_buf[6] = {0};
 

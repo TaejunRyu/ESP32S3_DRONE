@@ -1,4 +1,4 @@
-#include "ryu_SensorTask.hpp"
+#include "ryu_ImuSensorTask.hpp"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -12,39 +12,32 @@
 #include "ryu_SharedDataManager.hpp"
 #include "ryu_BusInterface.hpp"
 #include "ryu_KalmanFilter.hpp"
+#include "ryu_FlightTask.hpp"
 
 
 namespace Controller {
 
-esp_err_t SensorTask::initialize()
+esp_err_t ImuSensorTask::initialize()
 {
     esp_err_t err = ESP_OK;
     if (_initialized) return err;
-
-
-
 
 
     _initialized = true;
     return err;
 }
 
-void SensorTask::ReadSensorTask(void* pvParameters) {
-    ESP_LOGI(TAG, "SensorTask가 Core %d에서 시작되었습니다.", xPortGetCoreID());
+void ImuSensorTask::readImuSensorTask(void* pvParameters) {
+    ESP_LOGI(TAG, "ImuSensor가 Core %d에서 시작되었습니다.", xPortGetCoreID());
 
-    SensorTask* task = static_cast<SensorTask*>(pvParameters);
+    ImuSensorTask* task = static_cast<ImuSensorTask*>(pvParameters);
 
     // 1. SPI 드라이버 및 인터페이스 초기화
     Driver::SPI& spi = Driver::SPI::getInstance();
     spi.initialize();
 
-    //Driver::I2C& i2c = Driver::I2C::get_instance();
-    //i2c.initialize();
+    Interface::IBus* imu_interface = Interface::createBIF(spi.get_host(), SPI_CS_PIN);
     
-    Interface::IBus* imu_interface = Interface::createBIF(spi.get_host(), SPI_IMU_CS_PIN);
-    //Interface::IBus* bmp_interface = Interface::createBIF(spi.get_host(), SPI_BMP_CS_PIN);
-    //Interface::IBus* i2c_interface = Interface::createBIF(i2c.get_bus_handle(),Sensor::IST8310::ADDR);
-
     auto& icm20948 = Sensor::ICM20948::getInstance();
     icm20948.set_bus(imu_interface);
     icm20948.initialize();
@@ -52,18 +45,8 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
     icm20948.set_include_mag(true);  // ak09916포함
 
 
-    // auto& ist8310 = Sensor::IST8310::getInstance();
-    // ist8310.set_bus(i2c_interface);
-    // ist8310.initialize();
-
-    // auto& bmp388 = Sensor::IST8310::getInstance();
-    // bmp388.set_bus(bmp_interface);
-    // bmp388.initialize();
-
-
     // 싱글톤 중계 데이터 매니저 포인터 바인딩 완료
     auto& data_manager = SharedDataManager::getInstance();
-
   
     // 2. 부팅 직후 센서 0점 교정 안내
     ESP_LOGI(TAG, "센서 0점 교정을 시작합니다. 기체를 평평한 곳에 두고 움직이지 마세요.");
@@ -75,13 +58,13 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
     TickType_t xLastWakeTime;
     const TickType_t xFrequency = pdMS_TO_TICKS(1); 
     xLastWakeTime = xTaskGetTickCount(); 
-
+    esp_err_t err = ESP_OK;
     // 3. 실전 비행 데이터 초고속 수집 및 캘리브레이션 무한 루프
     while (true) {
         SensorData imu_data {};
-        
+
         // [버그 패치] 호출 주체를 칩 하위 주체 대신 내장된 updateSample 인터페이스로 복원
-        esp_err_t err = icm20948.updateSample(imu_data);
+        err = icm20948.updateSample(imu_data);
         
         if (err == ESP_OK) {
             communication_fail_count = 0; // 통신 성공 시 무조건 최상단에서 실패 카운트 리셋!
@@ -103,14 +86,15 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
             else {
                 // 0점 교정이 끝난 실전 비행 모드 데이터 정제 작업
                 icm20948.apply_filter(imu_data);
-            }            
-
+            }
             icm20948.align_NED(imu_data);            
             // [중계자 복사] 뮤텍스 락 오버헤드가 제거된 고속 대입 채널 전송
             //task->_data_manager->update_latest_imu(imu_data);
             data_manager.publish_data<Data_type::DT_IMU_DATA>(imu_data);
             // [초고속 저지연 파이프라인] 데이터 준비가 완료되었으므로 Core 1에서 대기 중인 비행 태스크를 즉시 무오래 깨움
-            TaskHandle_t flight_handle = data_manager.get_flight_task_handle();
+            //auto flight_handle = data_manager.get_flight_task_handle();
+
+            auto flight_handle = Flight::getInstance().getTaskHandle();
             if (flight_handle != nullptr) {
                 xTaskNotifyGive(flight_handle);
             }
@@ -125,19 +109,23 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
                 // task->_data_manager->trigger_emergency_stop();
             }
         }
+
+
+
+
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
 
-void SensorTask::StartTask() {
+void ImuSensorTask::StartTask() {
     // 비행 제어 태스크(우선순위 24)와의 배턴터치를 보장하기 위해 한 단계 낮은 우선순위 23으로 Core 0에 완벽 격리 배정
     xTaskCreatePinnedToCore(
-        ReadSensorTask,             
-        "ReadSensorTask",           
+        readImuSensorTask,             
+        "readImuSensorTask",           
         4096,                   
         this,                   
         configMAX_PRIORITIES - 2, 
-        nullptr,                
+        &_taskHandle,                
         0                       
     );
 }

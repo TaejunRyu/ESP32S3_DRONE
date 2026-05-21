@@ -14,7 +14,7 @@ namespace Interface {
 namespace Sensor
 {
 
-class IST8310  : public ISensor{
+class IST8310{
     private:
         IST8310()= default;
         static constexpr const char* TAG = "IST8310";
@@ -33,11 +33,12 @@ class IST8310  : public ISensor{
         // 인터페이스 주입 (핵심!)
         void set_bus(Interface::IBus* bus) { _ibus = bus; }
         Interface::IBus* get_bus(){ return _ibus;};    
-        esp_err_t initialize() override;
-        esp_err_t deinitialize() override;
-        esp_err_t updateSample(SensorData &sample) override;
-        bool is_initialized(){return _initialized;};
         
+        esp_err_t initialize();
+        esp_err_t deinitialize();
+        esp_err_t updateSample(Vector3f &sample);
+        bool is_initialized(){return _initialized;};
+        bool is_data_ready();
         esp_err_t read_data(Vector3f data);
         esp_err_t read_with_offset(Vector3f data);
         void calibrate_hard_iron();
@@ -55,6 +56,7 @@ class IST8310  : public ISensor{
         static inline constexpr uint8_t PDCNTL      =    0x42; // Pulse Duration 제어
         static inline constexpr uint8_t CROSSAXIS1  =    0x48; // 
         static inline constexpr uint8_t CROSSAXIS2  =    0x49; // 
+         static inline constexpr uint8_t STAT1_DRDY_MASK = 0x01; 
         // 센서 감도: 1320 LSB/Gauss (0.3 µT/LSB)
 
         static inline constexpr float SENSITIVITY   =  0.3f;   

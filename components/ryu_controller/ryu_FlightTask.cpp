@@ -8,7 +8,7 @@
 #include "ryu_Config.hpp"
 #include "ryu_SharedDataManager.hpp"
 #include "ryu_KalmanFilter.hpp"
-#include "ryu_SensorTask.hpp"
+#include "ryu_ImuSensorTask.hpp"
 #include "ryu_espnow.hpp"
 #include "ryu_mavlink.hpp"
 #include "ryu_timer.hpp"
@@ -17,10 +17,10 @@
 namespace Controller {
 
 esp_err_t Flight::initialize(){
+    esp_err_t err = ESP_OK;
+    err = Driver::Battery::get_instance().initialize();
 
-    Driver::Battery::get_instance().initialize();
-
-    return ESP_OK;
+    return err;
 }
 
 esp_err_t Flight::deinitialize(){
@@ -36,13 +36,8 @@ void Flight::flight_task(void *pvParameters)
     SharedDataManager& sharedData = SharedDataManager::getInstance();
 
     // 2. Core 0에서 구동될 센서 수집 태스크 가동
-    Controller::SensorTask* sensorTask = new (std::nothrow) Controller::SensorTask();
-    if (sensorTask == nullptr) {
-        ESP_LOGE(TAG, "치명적 오류: SensorTask 인스턴스 생성 실패!");
-        vTaskDelete(nullptr);
-        return;
-    }
-    sensorTask->StartTask();
+    ImuSensorTask& sensorTask =  ImuSensorTask::getInstance();
+    sensorTask.StartTask();
 
     // 3. 칼만 필터 코어 초기화 (NED 기준)
     Filter::KalmanFilter& kalman = Filter::KalmanFilter::getInstance();
@@ -95,8 +90,6 @@ void Flight::flight_task(void *pvParameters)
 
             // [EKF 핵심 엔진 가동] 자이로 예측 후 가속도/지자계 순차 보정 처리
             kalman.update(cur_imu_data.acc,gyro_rad, cur_imu_data.mag,dt);
-            // kalman.predict(gyro_rad, dt);
-            // kalman.update(cur_imu_data.acc, cur_imu_data.mag);
                         
             // 진북 기준 최종 오일러 각 추출 (라디안 단위)
             Attitude_t attitude = kalman.getEuler();
@@ -119,7 +112,6 @@ void Flight::flight_task(void *pvParameters)
             attitude.data[5] = cur_imu_data.gyro.z;
 
             // [중계자 복귀] 최종 수렴된 현재 수평 자세를 데이터 매니저에 즉시 업데이트
-            // sharedData.setAttitude(attitude);
             sharedData.publish_data<Data_type::DT_CURRENT_ATTITUDE>(attitude);
 
             // 여기에 추후 PID 제어 루프를 탑재하시면 됩니다.
@@ -141,15 +133,12 @@ void Flight::flight_task(void *pvParameters)
             ESP_LOGW(TAG, "비상: 센서 데이터 동기화 신호 지연 감지!");
         }
     }
-
-    delete sensorTask;
-    vTaskDelete(nullptr);
 }
 
-void Flight::start_task()
+esp_err_t  Flight::StartTask()
 {
     // 최상위 우선순위(configMAX_PRIORITIES - 1)로 가용한 최고 권력을 할당하여 Core 1에 전적 격리 구동
-    xTaskCreatePinnedToCore(
+    auto res = xTaskCreatePinnedToCore(
         flight_task,                
         "flight_task",              
         8192, 
@@ -158,8 +147,10 @@ void Flight::start_task()
         &_taskHandle,                    
         1 
     );
-    // [아키텍처 완성] 태스크가 정상 생성되자마자 중계자(SharedDataManager)에 내 핸들을 곧바로 중앙 등록
-    SharedDataManager::getInstance().register_flight_task_handle(_taskHandle);
+    if (res != pdTRUE){
+        return ESP_FAIL;
+    }
+    return ESP_OK;
 }
 
 } // namespace Controller

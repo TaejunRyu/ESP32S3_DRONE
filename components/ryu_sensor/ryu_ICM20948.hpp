@@ -20,7 +20,7 @@ class ICM20948 : public ISensor{
         // 싱글톤 패턴: 복사 및 이동 방지
         ICM20948(const ICM20948&) = delete;
         ICM20948& operator=(const ICM20948&) = delete;
-        ~ICM20948();
+        ~ICM20948() override;
 
 
         static inline constexpr uint8_t ADDR_VCC = 0x69;

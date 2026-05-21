@@ -9,8 +9,6 @@
  * @copyright Copyright (c) 2026
  * 
  */
-
-
 #pragma once
 
 #include <esp_err.h>
@@ -19,9 +17,7 @@
 
 namespace Controller{
 
-
-class Flight{
-    
+class Flight{    
     private: 
         static constexpr const char* TAG = "Flight";
 
@@ -38,8 +34,9 @@ class Flight{
         esp_err_t initialize();
         esp_err_t deinitialize();
         static void flight_task(void* pvParameters);
-        TaskHandle_t getTaskHandle(){return _taskHandle;};
-        void start_task();
+        TaskHandle_t getTaskHandle(){return _taskHandle;};        
+        esp_err_t StartTask();
+        
     private:
         TaskHandle_t _taskHandle = nullptr;
         bool _initialized = false;
