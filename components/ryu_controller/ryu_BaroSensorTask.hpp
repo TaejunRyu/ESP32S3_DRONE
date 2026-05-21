@@ -1,16 +1,14 @@
 #pragma once
 
-
 namespace Sensor{
     class ICM20948;
 }
 namespace Utils{
-    class SharedDataManager;
     class ImuCalibrator;
 }
 
 
-namespace Service{
+namespace Controller{
 
 class BaroTask{
     private:

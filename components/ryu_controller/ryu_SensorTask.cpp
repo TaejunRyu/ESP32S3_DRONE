@@ -15,7 +15,7 @@
 
 
 
-namespace Service {
+namespace Controller {
 
 SensorTask::~SensorTask() {
     // 자원 해제는 태스크의 수명 주기와 일치하도록 내부에서 완벽히 처리합니다.
@@ -95,7 +95,7 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
 
 
     // 싱글톤 중계 데이터 매니저 포인터 바인딩 완료
-    task->_data_manager = &Utils::SharedDataManager::getinstance();
+    task->_data_manager = &SharedDataManager::getInstance();
 
     // 1kHz 주기 제어 설정 (1ms)
     TickType_t xLastWakeTime;
@@ -140,7 +140,7 @@ void SensorTask::ReadSensorTask(void* pvParameters) {
             task->_icm20948->align_NED(imu_data);            
             // [중계자 복사] 뮤텍스 락 오버헤드가 제거된 고속 대입 채널 전송
             //task->_data_manager->update_latest_imu(imu_data);
-            task->_data_manager->publish_data<Utils::Data_type::DT_IMU_DATA>(imu_data);
+            task->_data_manager->publish_data<Data_type::DT_IMU_DATA>(imu_data);
             // [초고속 저지연 파이프라인] 데이터 준비가 완료되었으므로 Core 1에서 대기 중인 비행 태스크를 즉시 무오래 깨움
             TaskHandle_t flight_handle = task->_data_manager->get_flight_task_handle();
             if (flight_handle != nullptr) {

@@ -12,7 +12,7 @@
 #include "ryu_Types.hpp"
 #include <atomic> 
 
-namespace Utils {
+namespace Controller {
 
 enum class Data_type{
     DT_IMU_DATA,            // ACCEL,GYRO
@@ -56,7 +56,7 @@ private:
     std::atomic<TaskHandle_t> _flight_task_handle;
 
 public:
-    static SharedDataManager& getinstance() {
+    static SharedDataManager& getInstance() {
         static SharedDataManager instance;
         return instance;
     }       

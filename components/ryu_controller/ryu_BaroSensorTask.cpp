@@ -9,7 +9,7 @@
 #include "ryu_SharedDataManager.hpp"
 
 
-namespace Service {
+namespace Controller {
 
 void BaroTask::ReadBaroTask(void* pvParameters) {
     //BaroTask* task = static_cast<BaroTask*>(pvParameters);
@@ -33,7 +33,7 @@ void BaroTask::ReadBaroTask(void* pvParameters) {
             
             // [단계 4] 데이터 매니저에 안전하게 주입
             //Utils::SharedDataManager::getinstance().update_latest_baro(baro_buf);
-            Utils::SharedDataManager::getinstance().publish_data<Utils::Data_type::DT_BARO_DATA>(baro_buf);
+            Controller::SharedDataManager::getInstance().publish_data<Data_type::DT_BARO_DATA>(baro_buf);
         //}
         // 정확히 20ms 주기를 맞추기 위해 잔여 시간 휴식
         vTaskDelayUntil(&xLastWakeTime, xFrequency);

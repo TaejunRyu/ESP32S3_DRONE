@@ -8,20 +8,19 @@ namespace Sensor {
     class ICM20948;  //SPI BUS 사용
     class IST8310;   //I2C BUS 사용
 }
-namespace Utils {
-    class SharedDataManager;
-}
 
-namespace Service { 
+namespace Controller { 
+
+class SharedDataManager;
 
 class SensorTask {
 
     private:        
         static constexpr const char* TAG = "SensorTask";
         // [방어 설계] 모든 센서 인스턴스와 매니저 포인터는 private 영역에 격리합니다.
-        Sensor::ICM20948            *_icm20948;
-        Sensor::IST8310             *_ist8310;
-        Utils::SharedDataManager    *_data_manager;
+        Sensor::ICM20948                *_icm20948;
+        Sensor::IST8310                 *_ist8310;
+        SharedDataManager               *_data_manager;
     public:
         inline static constexpr int SPI_CS_PIN = 9;
         // [방어 설계] 생성자에서 모든 포인터를 nullptr로 확실하게 초기화하여 쓰레기 값을 방지합니다.

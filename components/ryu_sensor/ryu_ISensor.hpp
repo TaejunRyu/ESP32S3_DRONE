@@ -5,7 +5,7 @@
 #include "ryu_Types.hpp"
 
 
-namespace Interface{
+namespace Sensor{
 
 // 각 sensor는 해당 인터페이스를 계승 받아서 사용.
 class ISensor {

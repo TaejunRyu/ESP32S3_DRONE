@@ -647,9 +647,9 @@ void Mavlink::on_timer_tick()
     mavlink_message_t msg;
 
     // 10hz로 구분하고 있으므로 매번 처리...
-    Utils::SharedDataManager& sharedData = Utils::SharedDataManager::getinstance();
+    Controller::SharedDataManager& sharedData = Controller::SharedDataManager::getInstance();
     //Attitude_t attitude = sharedData.getAttitude();
-    Attitude_t attitude =  sharedData.get_shared_data<Utils::Data_type::DT_CURRENT_ATTITUDE>();
+    Attitude_t attitude =  sharedData.get_shared_data<Controller::Data_type::DT_CURRENT_ATTITUDE>();
     mavlink_msg_attitude_pack(ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, esp_timer_get_time()/1000, 
                                         attitude.roll  * DEG_TO_RAD, //roll
                                         attitude.pitch * DEG_TO_RAD, //pitch

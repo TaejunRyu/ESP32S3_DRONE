@@ -5,7 +5,7 @@
 #include <driver/i2c_master.h>
 #include <esp_log.h>
 #include "ryu_BusInterface.hpp"
-#include "ryu_ImuInterface.hpp"
+#include "ryu_ISensor.hpp"
 
 namespace Interface {
     class IBus;
@@ -14,7 +14,7 @@ namespace Interface {
 namespace Sensor
 {
 
-class IST8310  : public Interface::ISensor{
+class IST8310  : public ISensor{
     private:
         IST8310()= default;
         static constexpr const char* TAG = "IST8310";

@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <string>
 #include <esp_log.h>
-#include "ryu_ImuInterface.hpp"
+#include "ryu_ISensor.hpp"
 
 
 namespace Interface{
@@ -13,7 +13,7 @@ namespace Interface{
 
 namespace Sensor{
 
-class BMP388 : public Interface::ISensor{
+class BMP388 : public ISensor{
     private:
         BMP388()= default;
         static constexpr const char* TAG = "BMP388";

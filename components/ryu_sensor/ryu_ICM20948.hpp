@@ -1,6 +1,6 @@
 #pragma once
 #include <memory>
-#include "ryu_ImuInterface.hpp"
+#include "ryu_ISensor.hpp"
 
 namespace Interface{
     class IBus;
@@ -8,7 +8,7 @@ namespace Interface{
 
 namespace Sensor{
 
-class ICM20948 : public Interface::ISensor{
+class ICM20948 : public ISensor{
     private:
         ICM20948()= default;
         static constexpr const char* TAG = "ICM20948";
