@@ -4,7 +4,7 @@
 #include <driver/gpio.h>
 
 #include "ryu_ImuInterface.hpp"
-#include "ryu_FrameTransformer.hpp"
+//#include "ryu_FrameTransformer.hpp"
 
 namespace Interface{
     class IBus;
@@ -125,7 +125,7 @@ class ICM20948 : public Interface::IImuSensor{
         // 이전 측정값 (값의 연속성을 위하여 이전값을 저장한다. 리딩 타임이 다르기 때문에....)
         Vector3f _mag_previous {0.0f,0.0f,0.0f};
 
-        bool _include_mag = false;
+        bool _include_mag = false;  // ak?????를 사용하지않고 ist8310를 사용시.(true)
         bool _calibration = false;
         bool _initialized = false;
         Interface::IBus* _ibus = nullptr;
