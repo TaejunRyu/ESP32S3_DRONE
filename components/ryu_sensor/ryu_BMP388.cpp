@@ -113,32 +113,40 @@ esp_err_t BMP388::deinitialize()
  */
 esp_err_t BMP388::read_calib()
 {
-   // 📢 통찰 반영: 원하는 길이(21)보다 1바이트 더 길게 잡음 (더미 안착용)
-    uint8_t d[22] = {0}; 
+   // 질문자님의 통찰 반영: 21바이트 데이터를 위해 22바이트 배열 선언
+    uint8_t d[23] = {0}; 
     
-    // SPI 인터페이스를 통해 총 22바이트 연속 로드
-    esp_err_t ret = _ibus->Read(0x13, d, 22); // REG_CALIB = 0x13
+    // 0x13번지부터 더미 포함 22바이트 연속 로드
+    esp_err_t ret = _ibus->Read(0x13, d, 23); 
     if (ret != ESP_OK) return ret;
     
-    // [인덱스 1부터 조립 완성] 0번은 더미가 먹고, 1번부터 진짜 데이터 시작!
-    _coef.t1 = (uint16_t)(((uint16_t)d[2] << 8) | d[1]);
-    _coef.t2 = (uint16_t)(((uint16_t)d[4] << 8) | d[3]);
-    _coef.t3 = (int8_t)d[5];
+    // 0번 인덱스(d[0])는 보쉬 SPI 필수 더미 바이트이므로 패스, 1번 인덱스부터 사용
+    size_t o = 1; 
+
+    // [부호 확장 차단 정밀 캐스팅 매핑]
+    // 하위 바이트 d[o]와 상위 바이트 d[o+1]을 완벽하게 uint16_t 공간 안에서 OR 연산한 뒤,
+    // 부호가 필요한 변수들만 최종적으로 (int16_t) 처리를 해줍니다.
+    _coef.t1 = (uint16_t)(((uint16_t)d[o + 1] << 8) | (uint16_t)d[o + 0]);
+    _coef.t2 = (uint16_t)(((uint16_t)d[o + 3] << 8) | (uint16_t)d[o + 2]);
+    _coef.t3 = (int8_t)d[o + 4];
     
-    _coef.p1 = (int16_t)(((uint16_t)d[7] << 8) | d[6]);
-    _coef.p2 = (int16_t)(((uint16_t)d[9] << 8) | d[8]);
-    _coef.p3 = (int8_t)d[10];
-    _coef.p4 = (int8_t)d[11];
+    _coef.p1 = (int16_t)(((uint16_t)d[o + 6] << 8) | (uint16_t)d[o + 5]);
+    _coef.p2 = (int16_t)(((uint16_t)d[o + 8] << 8) | (uint16_t)d[o + 7]);
+    _coef.p3 = (int8_t)d[o + 9];
+    _coef.p4 = (int8_t)d[o + 10];
     
-    _coef.p5 = (uint16_t)(((uint16_t)d[13] << 8) | d[12]);
-    _coef.p6 = (uint16_t)(((uint16_t)d[15] << 8) | d[14]);
-    _coef.p7 = (int8_t)d[16];
-    _coef.p8 = (int8_t)d[17];
+    _coef.p5 = (uint16_t)(((uint16_t)d[o + 12] << 8) | (uint16_t)d[o + 11]);
+    _coef.p6 = (uint16_t)(((uint16_t)d[o + 14] << 8) | (uint16_t)d[o + 13]);
+    _coef.p7 = (int8_t)d[o + 15];
+    _coef.p8 = (int8_t)d[o + 16];
     
-    _coef.p9 = (int16_t)(((uint16_t)d[19] << 8) | d[18]);
-    _coef.p10 = (int8_t)d[20];
-    _coef.p11 = (int8_t)d[21];
-    
+    _coef.p9 = (int16_t)(((uint16_t)d[o + 18] << 8) | (uint16_t)d[o + 17]);
+    _coef.p10 = (int8_t)d[o + 19];
+    _coef.p11 = (int8_t)d[o + 20];
+    // read_calib() 내부 맨 하단에 추가
+ESP_LOGW("CALIB_RAW", "d[1]:0x%02X, d[2]:0x%02X | d[6]:0x%02X, d[7]:0x%02X", d[1], d[2], d[6], d[7]);
+ESP_LOGW("CALIB_COEF", "t1:%u, t2:%u, p1:%d, p2:%d", _coef.t1, _coef.t2, _coef.p1, _coef.p2);
+
     return ESP_OK;
 }
 
@@ -233,18 +241,22 @@ bool BMP388::is_data_ready()
  *      1. 센서 초기화 함수(begin 등)에서 '딱 한 번' 계산
  */
 void BMP388::init_coefficients() {
-    // 여기서는 성능 걱정 없이 정확하게 계산합니다.
-    _p1 = ((float)_coef.p1 - 16384.0f) / 1048576.0f;
-    _p2 = ((float)_coef.p2 - 16384.0f) / 536870912.0f;
-    _p3 = (float)_coef.p3 / 4294967296.0f;
-    _p4 = (float)_coef.p4 / 137438953472.0f;
-    _p5 = (float)_coef.p5 * 8.0f; 
-    _p6 = (float)_coef.p6 / 64.0f;
-    _p7 = (float)_coef.p7 / 256.0f;
-    _p8 = (float)_coef.p8 / 32768.0f;
-    _p9 = (float)_coef.p9 / 281474976710656.0f;
-    _p10 = (float)_coef.p10 / 281474976710656.0f;
-    _p11 = (float)_coef.p11 / 36893488147419103232.0f;
+     // 거대한 정수 나눗셈 시 float 정밀도 붕괴(언더플로우)를 막기 위해,
+    // 보쉬 공식 드라이버 사양 규격인 정확한 2의 거듭제곱 가중치 연산으로 전면 교정합니다.
+    _p1 = ((float)_coef.p1 - 16384.0f) / 1048576.0f;               // (p1 - 2^14) / 2^20
+    _p2 = ((float)_coef.p2 - 16384.0f) / 536870912.0f;              // (p2 - 2^14) / 2^29
+    _p3 = (float)_coef.p3 / 4294967296.0f;                          // p3 / 2^32
+    _p4 = (float)_coef.p4 / 137438953472.0f;                        // p4 / 2^37
+    _p5 = (float)_coef.p5 * 8.0f;                                   // p5 * 2^3
+    _p6 = (float)_coef.p6 / 64.0f;                                  // p6 / 2^6
+    _p7 = (float)_coef.p7 / 256.0f;                                 // p7 / 2^8
+    _p8 = (float)_coef.p8 / 32768.0f;                               // p8 / 2^15
+    
+    // [치명적 구간 수정] 거대한 상수는 double(64비트 정밀도) 캐스팅 후 연산하여 
+    // 컴파일 시점의 정밀도 누수를 원천 차단한 뒤 최종 float에 대입합니다.
+    _p9 = (float)((double)_coef.p9 / 281474976710656.0);            // p9 / 2^48
+    _p10 = (float)((double)_coef.p10 / 281474976710656.0);          // p10 / 2^48
+    _p11 = (float)((double)_coef.p11 / 36893488147419103232.0);      // p11 / 2^65
 }
 
 
@@ -283,6 +295,11 @@ esp_err_t BMP388::get_pressure(float * pressure)
         float comp_press = partial_out1 + partial_out2 + d4;
 
         *pressure = static_cast<float>(comp_press * 0.01f);
+
+   
+ ESP_LOGI("BMP_DIAG", "pressure:%8.3f", *pressure);
+
+
         return ret_code; // Pa -> hPa
     } else {
         *pressure = 0.0f;
@@ -340,9 +357,9 @@ esp_err_t BMP388::read_bmp388(uint32_t* adcp,uint32_t* adct){
     *adcp = adc_p;
     *adct = adc_t;
     
- ESP_LOGI("BMP_DIAG", "RAW ADC -> P: %u (0x%06X) | T: %u (0x%06X)", 
-             (unsigned int)adc_p, (unsigned int)adc_p, 
-             (unsigned int)adc_t, (unsigned int)adc_t);
+//  ESP_LOGI("BMP_DIAG", "RAW ADC -> P: %u (0x%06X) | T: %u (0x%06X)", 
+//              (unsigned int)adc_p, (unsigned int)adc_p, 
+//              (unsigned int)adc_t, (unsigned int)adc_t);
 
     return ret;
 }

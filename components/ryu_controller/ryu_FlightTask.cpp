@@ -49,19 +49,19 @@ void Flight::flight_task(void *pvParameters)
     kalman.init(0.0f, 0.0f, 0.0f);
 
     // 4. 기타 비행 통신 및 타이머 서비스 가동
-    Service::EspNow& espnow = Service::EspNow::get_instance();
-    espnow.initialize();
-    espnow.start_task();
-    espnow.connect_callback();
+    // Service::EspNow& espnow = Service::EspNow::get_instance();
+    // espnow.initialize();
+    // espnow.start_task();
+    // espnow.connect_callback();
 
 
     Service::Timer& timer = Service::Timer::get_instance();
     timer.intiallize();
     timer.Start();
 
-    Service::Mavlink& mavlink = Service::Mavlink::get_instance();
-    mavlink.initialize();
-    mavlink.start_task();
+    // Service::Mavlink& mavlink = Service::Mavlink::get_instance();
+    // mavlink.initialize();
+    // mavlink.start_task();
     
     uint32_t loop_cnt = 0;
         
