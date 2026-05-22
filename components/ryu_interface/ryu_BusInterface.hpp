@@ -64,6 +64,7 @@ class I2CBus : public IBus {
         inline esp_err_t Write(uint8_t reg, uint8_t data) override {
             uint8_t buf[2] = {reg, data};
             return i2c_master_transmit(_handle, buf, 2, pdMS_TO_TICKS(2));
+        
         }
 
         inline esp_err_t Read(uint8_t reg, uint8_t* data, size_t len) override {

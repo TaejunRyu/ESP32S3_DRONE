@@ -33,7 +33,7 @@ void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
     BaroData baro_buf {};
 
     while (true) {
-        if (bmp388.is_data_ready()){
+        //if (bmp388.is_data_ready()){
             bmp388.get_relative_altitude(&filtered_alt);
             gnd_pressure = bmp388.get_ground_pressure();
             clib_rate = bmp388.get_climb_rate();
@@ -45,7 +45,7 @@ void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
             
             SharedDataManager::getInstance().publish_data<Data_type::DT_BARO_DATA>(baro_buf);
             SharedDataManager::getInstance().set_baro_updated(true);
-        }
+        //}
         
         // 정확히 20ms 주기를 맞추기 위해 잔여 시간 휴식
         vTaskDelayUntil(&xLastWakeTime, xFrequency);

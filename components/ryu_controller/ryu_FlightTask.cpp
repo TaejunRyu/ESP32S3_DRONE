@@ -9,6 +9,7 @@
 #include "ryu_SharedDataManager.hpp"
 #include "ryu_KalmanFilter.hpp"
 #include "ryu_ImuSensorTask.hpp"
+#include "ryu_BaroSensorTask.hpp"
 #include "ryu_espnow.hpp"
 #include "ryu_mavlink.hpp"
 #include "ryu_timer.hpp"
@@ -38,6 +39,10 @@ void Flight::flight_task(void *pvParameters)
     // 2. Core 0에서 구동될 센서 수집 태스크 가동
     ImuSensorTask& sensorTask =  ImuSensorTask::getInstance();
     sensorTask.StartTask();
+
+    BaroSensorTask& baroTask = BaroSensorTask::getInstance();
+    baroTask.initialize();
+    baroTask.StartTask();
 
     // 3. 칼만 필터 코어 초기화 (NED 기준)
     Filter::KalmanFilter& kalman = Filter::KalmanFilter::getInstance();
@@ -113,20 +118,24 @@ void Flight::flight_task(void *pvParameters)
 
             // [중계자 복귀] 최종 수렴된 현재 수평 자세를 데이터 매니저에 즉시 업데이트
             sharedData.publish_data<Data_type::DT_CURRENT_ATTITUDE>(attitude);
-
+            BaroData baroData{};
+            if(sharedData.is_baro_updated()){
+                baroData =  sharedData.get_shared_data<Data_type::DT_BARO_DATA>();
+            }
             // 여기에 추후 PID 제어 루프를 탑재하시면 됩니다.
             // run_pid_control(attitude, cur_imu_data.gyro);
 
             // [출력 가독성 최적화] UART 병목 및 로깅 오버헤드를 막기 위한 50Hz(20ms) 주기 필터링 로그
-            if (++loop_cnt >= 20) { 
-                loop_cnt = 0;
-                ESP_LOGI(TAG, "|AX: %8.5f |AY: %8.5f |AZ: %8.5f |GX: %8.5f |GY: %8.5f |GZ: %8.5f |MX: %8.5f |MY: %8.5f |MZ: %8.5f |R: %8.5f |P: %8.5f |Y: %8.5f", 
-                        cur_imu_data.acc.x,   cur_imu_data.acc.y,   cur_imu_data.acc.z,
-                        gyro_rad.x,           gyro_rad.y,           gyro_rad.z,
-                        cur_imu_data.mag.x,   cur_imu_data.mag.y,   cur_imu_data.mag.z,
-                        attitude.roll,        attitude.pitch,       attitude.yaw
-                    );
-            }            
+            // if (++loop_cnt >= 20) { 
+            //     loop_cnt = 0;
+            //     ESP_LOGI(TAG, "|AX: %8.5f |AY: %8.5f |AZ: %8.5f | GX: %8.5f |GY: %8.5f |GZ: %8.5f | MX: %8.5f |MY: %8.5f |MZ: %8.5f |R: %8.5f |P: %8.5f |Y: %8.5f| pressure: %8.5f | alt:%8.5f |clib_rate:%8.5F", 
+            //             cur_imu_data.acc.x,   cur_imu_data.acc.y,   cur_imu_data.acc.z,
+            //             gyro_rad.x,           gyro_rad.y,           gyro_rad.z,
+            //             cur_imu_data.mag.x,   cur_imu_data.mag.y,   cur_imu_data.mag.z,
+            //             attitude.roll,        attitude.pitch,       attitude.yaw,
+            //             baroData.pressure, baroData.altitude,baroData.climb_rate
+            //         );
+            // }            
         } else {
             // Failsafe 트리거: 5ms 동안 Core 0로부터 동기화 신호(Notification)가 누락된 상황 예외 처리
             // SensorTask에서 신호가 안오면 작동이 불능이 되므로 이곳이 실행되어진다.

@@ -27,72 +27,66 @@ esp_err_t BMP388::initialize()
 
     if(_ibus == nullptr) return ESP_FAIL; // 인터페이스 주입 확인
 
-    // 1. Soft Reset
+// [질문자님 가이드 반영] 1바이트를 안전하게 읽기 위해 '더미 안착용' 2바이트 배열 선언
+    uint8_t id_check_buf[2] = {0}; 
+    
+    // 1. 초기 래치 해제용 CHIP_ID 공회전 (2바이트 요청)
+    _ibus->Read(0x00, id_check_buf, 2);
+    vTaskDelay(pdMS_TO_TICKS(20)); 
+
+    // 2. Soft Reset 수행
     err = _ibus->Write(0x7E, 0xB6);
-    if(err !=ESP_OK){ 
-        ESP_LOGI(TAG,"Soft Reset Failure.");
-        return err;
-    }    
-    vTaskDelay(pdMS_TO_TICKS(50)); // 시간을 넉넉히 줍니다.
+    if (err != ESP_OK) return err;
+    vTaskDelay(pdMS_TO_TICKS(50)); // 리셋 후 부팅 대기 (데이터시트 필수 스펙)
 
-    // 2. 중요: 일단 Sleep Mode로 전환하여 설정을 초기화 (0x1B에 0x00)
-    err = _ibus->Write(0x1B, 0x00);
+    // 3. 진짜 CHIP_ID 검증 (2바이트 요청)
+    // 📢 통찰 반영: 버퍼 크기를 2로 주어 더미가 [0]번에 안전하게 박히도록 유도합니다.
+    uint8_t chip_id_buf[2] = {0};
+    err = _ibus->Read(0x00, chip_id_buf, 2);
+    
+    // [인덱스 1번 조립] 0번은 더미가 먹고, 1번에 안착한 진짜 알맹이(0x50)를 추출합니다!
+    uint8_t actual_chip_id = chip_id_buf[1]; 
+    
+    if (err != ESP_OK || actual_chip_id != 0x50) {
+        ESP_LOGE(TAG, "CHIP_ID Verification Failed! Read Dummy[0]: 0x%02X, Actual_ID[1]: 0x%02X (Expected: 0x50)", 
+                 chip_id_buf[0], actual_chip_id);
+        return ESP_FAIL; // 이 검증선이 뚫려야 센서가 정상 동작합니다.
+    }
+    ESP_LOGI(TAG, "BMP388 Hardware Connection Perfectly Verified! Chip ID: 0x%02X", actual_chip_id);
 
-    if(err !=ESP_OK) {
-        ESP_LOGI(TAG,"Sleep Mode Failure.");
-        return err;
-    }
-    vTaskDelay(pdMS_TO_TICKS(10));
+    // 4. Sleep Mode 진입 후 정석 설정값들 순서대로 주입
+    _ibus->Write(0x1B, 0x00);
+    vTaskDelay(pdMS_TO_TICKS(5));
 
-    // 1. OSR 설정 (압력 x8, 온도 x2 권장: 0x11)
-    err = _ibus->Write(0x1C, (0x03 << 0)  | (0x01 << 3));
-    if(err !=ESP_OK) {
-        ESP_LOGI(TAG,"OSR Failure.");
-        return err;
-    }
-    //IIR 필터 계수 (0x1F): 현재 0x02 << 1 (계수 3) 정도로 설정되어 있습니다. 
-    //비행 중 진동이 심하다면 이 값을 조금 더 높여(예: 계수 7) 노이즈를 억제할 수 있습니다.
-    // 2. IIR 필터 및 ODR(100Hz) 설정
-    err = _ibus->Write(0x1F, 0x02<<1);
-    if(err !=ESP_OK) {
-        ESP_LOGI(TAG,"IIR Failure.");
-        return err;
-    }
-    // 2. ODR 설정 (100Hz로 설정하여 50Hz 읽기 루프 지원)
-    err = _ibus->Write(0x1D, 0x02);
-    if(err !=ESP_OK) {
-        ESP_LOGI(TAG,"ODR Failure.");
-        return err;
-    }
-    // 0x13: Forced Mode, Temp EN, Press EN
-    err = _ibus->Write(0x1B, 0x13);
-
-    if(err !=ESP_OK) {
-        ESP_LOGI(TAG,"Forced Mode Failure.");
-        return err;
-    }
-    vTaskDelay(pdMS_TO_TICKS(50)); // 측정 완료 대기
-
-    // 4. 드디어 Normal Mode 작동 (0x33)
-    err = _ibus->Write(0x1B, 0x33);
-    if(err !=ESP_OK) {
-        ESP_LOGI(TAG,"Normal Mode Failure.");
-        return err;
-    }
-    // 5. 첫 측정 대기: 중요!
-    vTaskDelay(pdMS_TO_TICKS(50));
-    // 보정계수 읽어오기
+    // 보정 계수 수집 (이전 대화에서 정립된 22바이트 버퍼 가이드 유지)
     err = read_calib();   
-    if(err !=ESP_OK){ 
-        return err;    
-    }
-    else{ // 복잡한 수식 계산 미리 처리
-        init_coefficients();
-    }
-    _initialized = true;
+    if (err != ESP_OK) return err;
+    init_coefficients();
 
-    ESP_LOGI(TAG,"Initialized sucessfully.");    
-    return err;
+    // 데이터시트 공식 오피셜 하드웨어 설정 매크로 작성
+    _ibus->Write(0x1C, 0x0B);     // OSR 설정 (압력 x8, 온도 x2)
+    vTaskDelay(pdMS_TO_TICKS(5));
+    _ibus->Write(0x1F, 0x04);     // IIR 필터 계수 3
+    vTaskDelay(pdMS_TO_TICKS(5));
+    _ibus->Write(0x1D, 0x03);     // ODR 100Hz 주기 보정 (0x02에서 0x03으로 정정 완료)
+    vTaskDelay(pdMS_TO_TICKS(15)); // 타이머 안정화 대기
+
+    // 5. 최종 Normal Mode 가동 (0x33)
+    err = _ibus->Write(0x1B, 0x33);
+    if (err != ESP_OK) return err;
+    
+    vTaskDelay(pdMS_TO_TICKS(50)); // 첫 데이터 측정 필터링 적재 시간 휴식
+
+    // 6. 교착 상태 해제를 위한 초기 지상 기압 획득
+    float temp_press = 0.0f;
+    for (int i = 0; i < 5; ++i) {
+        get_pressure(&temp_press);
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    _ground_pressure = (temp_press > 600.0f && temp_press < 1150.0f) ? temp_press : 1013.25f;
+
+    _initialized = true;
+    return ESP_OK;
 }
 
 esp_err_t BMP388::deinitialize()
@@ -119,26 +113,33 @@ esp_err_t BMP388::deinitialize()
  */
 esp_err_t BMP388::read_calib()
 {
-    esp_err_t ret_code = ESP_FAIL;
-    uint8_t d[21];
-    ret_code = _ibus->Read(REG_CALIB,d,21);
-    if(ret_code != ESP_OK) return ret_code;
-    // 데이터시트 Table 29: Compensation parameter storage 정밀 매핑
-    _coef.t1 = (uint16_t)((uint16_t)d[1] << 8 | d[0]);
-    _coef.t2 = (uint16_t)((uint16_t)d[3] << 8 | d[2]);
-    _coef.t3 = (int8_t)d[4];
-    _coef.p1 = (int16_t)((int16_t)d[6] << 8 | d[5]);
-    _coef.p2 = (int16_t)((int16_t)d[8] << 8 | d[7]);
-    _coef.p3 = (int8_t)d[9];
-    _coef.p4 = (int8_t)d[10];
-    _coef.p5 = (uint16_t)((uint16_t)d[12] << 8 | d[11]);
-    _coef.p6 = (uint16_t)((uint16_t)d[14] << 8 | d[13]);
-    _coef.p7 = (int8_t)d[15];
-    _coef.p8 = (int8_t)d[16];
-    _coef.p9 = (int16_t)((int16_t)d[18] << 8 | d[17]);
-    _coef.p10 = (int8_t)d[19];
-    _coef.p11 = (int8_t)d[20];
-    return  ret_code;
+   // 📢 통찰 반영: 원하는 길이(21)보다 1바이트 더 길게 잡음 (더미 안착용)
+    uint8_t d[22] = {0}; 
+    
+    // SPI 인터페이스를 통해 총 22바이트 연속 로드
+    esp_err_t ret = _ibus->Read(0x13, d, 22); // REG_CALIB = 0x13
+    if (ret != ESP_OK) return ret;
+    
+    // [인덱스 1부터 조립 완성] 0번은 더미가 먹고, 1번부터 진짜 데이터 시작!
+    _coef.t1 = (uint16_t)(((uint16_t)d[2] << 8) | d[1]);
+    _coef.t2 = (uint16_t)(((uint16_t)d[4] << 8) | d[3]);
+    _coef.t3 = (int8_t)d[5];
+    
+    _coef.p1 = (int16_t)(((uint16_t)d[7] << 8) | d[6]);
+    _coef.p2 = (int16_t)(((uint16_t)d[9] << 8) | d[8]);
+    _coef.p3 = (int8_t)d[10];
+    _coef.p4 = (int8_t)d[11];
+    
+    _coef.p5 = (uint16_t)(((uint16_t)d[13] << 8) | d[12]);
+    _coef.p6 = (uint16_t)(((uint16_t)d[15] << 8) | d[14]);
+    _coef.p7 = (int8_t)d[16];
+    _coef.p8 = (int8_t)d[17];
+    
+    _coef.p9 = (int16_t)(((uint16_t)d[19] << 8) | d[18]);
+    _coef.p10 = (int8_t)d[20];
+    _coef.p11 = (int8_t)d[21];
+    
+    return ESP_OK;
 }
 
 
@@ -251,6 +252,7 @@ esp_err_t BMP388::get_pressure(float * pressure)
 {
     uint32_t adc_p{},adc_t{}; 
     auto  ret_code = read_bmp388(&adc_p ,&adc_t);        
+
     if (ret_code == ESP_OK){
         float uncomp_p = static_cast<float>(adc_p);
         float uncomp_t = static_cast<float>(adc_t);
@@ -319,27 +321,30 @@ esp_err_t BMP388::get_relative_altitude(float * filtered_alt)
 }
 
 
+
 esp_err_t BMP388::read_bmp388(uint32_t* adcp,uint32_t* adct){
-    uint8_t d[6] = {0};
-    // 데이터 읽기 실패 시 0 반환
-    esp_err_t ret_code  = _ibus->Read(REG_DATA,d,6);
-    if (ret_code != ESP_OK) {
-        ESP_LOGE(TAG, "Read error: %s", esp_err_to_name(ret_code)); // 에러 종류 확인
-        *adcp = 0;
-        *adct = 0;
-        return ESP_FAIL;
-    }
-    // 1. Raw ADC (24-bit) 조합: 데이터시트상 [0]=LSB, [1]=MSB, [2]=XLSB 순서임
-    // 반드시 uint32_t로 먼저 합친 후 double로 변환해야 데이터가 안 깨짐
-    uint32_t adc_p = (uint32_t)d[2] << 16 | (uint32_t)d[1] << 8 | (uint32_t)d[0];
-    uint32_t adc_t = (uint32_t)d[5] << 16 | (uint32_t)d[4] << 8 | (uint32_t)d[3];
+      // 📢 통찰 반영: 원하는 길이(6)보다 1바이트 더 길게 잡음 (더미 안착용)
+    uint8_t d[7] = {0}; 
+    
+    // SPI 인터페이스를 통해 총 7바이트 연속 로드
+    esp_err_t ret = _ibus->Read(0x04, d, 7); // REG_DATA = 0x04
+    if (ret != ESP_OK) return ESP_FAIL;
+
+    // [인덱스 1부터 조립 완성] 0번은 더미가 먹고, 1번부터 진짜 데이터 시작!
+    // XLSB -> LSB -> MSB 정석 구조 매핑
+    uint32_t adc_p = ((uint32_t)d[3] << 16) | ((uint32_t)d[2] << 8) | (uint32_t)d[1];
+    uint32_t adc_t = ((uint32_t)d[6] << 16) | ((uint32_t)d[5] << 8) | (uint32_t)d[4];
     
     this->adc_p_last = adc_p;
     this->adc_t_last = adc_t;
     *adcp = adc_p;
     *adct = adc_t;
     
-    return ret_code;
+ ESP_LOGI("BMP_DIAG", "RAW ADC -> P: %u (0x%06X) | T: %u (0x%06X)", 
+             (unsigned int)adc_p, (unsigned int)adc_p, 
+             (unsigned int)adc_t, (unsigned int)adc_t);
+
+    return ret;
 }
 
 
