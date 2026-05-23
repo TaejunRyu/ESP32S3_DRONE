@@ -131,7 +131,6 @@ void Gps::gps_ubx_mode_task(void *pvParameters)
     const auto xFrequency = pdMS_TO_TICKS(50); // 1 loop에 50ms  x 20번 = 1000ms = 1 second    
     auto xLastWakeTime = xTaskGetTickCount();
     while (true) {
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
         
         // 버퍼에 쌓인 모든 바이트를 소진할 때까지 반복
         size_t buffered_len;
@@ -175,6 +174,9 @@ void Gps::gps_ubx_mode_task(void *pvParameters)
                                 state =0;
                                 break;
                             }
+                            
+                            ESP_LOGW(TAG,"Gps Looping");
+
                             // 성공! 데이터를 구조체로 복사
                             ubx_nav_pvt_t* pvt = (ubx_nav_pvt_t *)payload;
 
@@ -247,6 +249,7 @@ void Gps::gps_ubx_mode_task(void *pvParameters)
                 } // switch
             }
         }
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
 

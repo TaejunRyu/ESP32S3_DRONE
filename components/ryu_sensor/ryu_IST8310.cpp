@@ -107,22 +107,26 @@ esp_err_t IST8310::deinitialize()
 esp_err_t IST8310::updateSample(Vector3f &sample)
 {
       // 1. 하드웨어 버스 연결 상태 방어적 체크
-    if (_ibus == nullptr) return ESP_ERR_INVALID_STATE;        
+    if (_ibus == nullptr) return ESP_FAIL;        
     
-    Vector3f data;
+    Vector3f data{};
     esp_err_t err = read_data(data); // 칩 레지스터 일괄 리딩 (내부에서 mag 데이터 및 플래그 갱신됨)
-    
+
     // 2. 통신이 완벽하게 성공한 경우에만 상위 객체로 데이터 복사
     if (err == ESP_OK){
         sample    = (data -_mag_offset) * _mag_scale;
         _mag_previous =sample;   //정상으로 읽었을때 자료 보관.       
-        //sample.is_mag_updated = true;
     }else{
         //sample.is_mag_updated = false;
         sample = _mag_previous;
     }
     return err;
 }
+
+void IST8310::align_NED(Vector3f &data){
+    data.x *=  -1.0f;
+}
+
 
 bool IST8310::is_data_ready()
 {  
@@ -140,20 +144,19 @@ bool IST8310::is_data_ready()
     return (status_reg & STAT1_DRDY_MASK) != 0;
 }
 
-esp_err_t IST8310::read_data(Vector3f data)
-{
 
+
+esp_err_t IST8310::read_data(Vector3f& data)
+{
+    data =0.0f;
     uint8_t rx_buf[6] = {0};
-    Vector3f raw_data{};    
     esp_err_t err = _ibus->Read(DATA_X_L,rx_buf,6);
 
     // 2. I2C 통신 실패 시 방어 코드
     if (err != ESP_OK) {
         // 통신이 실패하면 드론이 추락하는 것을 막기 위해 '직전 정상 데이터'를 그대로 반환합니다.
-        data=_mag_previous;
         return err;
     }
-
     // 3. 바이트 결합 및 부호 있는 16비트 정수 변환 (Little Endian)
     // IST8310은 하위 바이트(Low)가 먼저 오고 상위 바이트(High)가 나중에 옵니다.
     Vector3f raw{};
@@ -163,32 +166,10 @@ esp_err_t IST8310::read_data(Vector3f data)
 
     // 4. 감도 적용 (Gauss 또는 uT 단위 변환)
     // 헤더에 정의하신 SENSITIVITY(0.3f) 값을 곱해 물리량으로 바꿉니다.
-    raw_data =  raw * SENSITIVITY;
-
-    // 5. 소프트웨어 IIR 로우패스 필터 적용 (드론 모터 노이즈 제거)
-    if (_mag_previous.x == 0.0f && _mag_previous.y == 0.0f && _mag_previous.z == 0.0f) {
-        // 최초 실행 시에는 필터링 없이 현재 값 저장
-        _mag_previous = raw_data;
-    } else {
-        // 이전 값과 현재 값의 가중치 평균을 구합니다.
-        _mag_previous = _mag_previous + (raw_data - _mag_previous) * FILTER_ALPHA ;
-    }
-    data =_mag_previous;
+    data =  raw * SENSITIVITY;
     return ESP_OK;
 }
 
-
-esp_err_t IST8310::read_with_offset(Vector3f data)
-{
-    Vector3f raw{};
-    auto err = this->read_data(raw);
-    raw = (raw - _mag_offset) * _mag_scale;
-    raw.normalize();    
-    // X를 (-)부호를 해야지 Mahony를 통과
-    raw.x *=  -1.0f;
-    data =raw;
-    return err;
-}
 
 
 

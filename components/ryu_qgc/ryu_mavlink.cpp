@@ -647,9 +647,7 @@ void Mavlink::on_timer_tick()
     mavlink_message_t msg;
 
     // 10hz로 구분하고 있으므로 매번 처리...
-    Controller::SharedDataManager& sharedData = Controller::SharedDataManager::getInstance();
-    //Attitude_t attitude = sharedData.getAttitude();
-    Attitude_t attitude =  sharedData.get_shared_data<Controller::Data_type::DT_CURRENT_ATTITUDE>();
+    Attitude_t attitude =  Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_CURRENT_ATTITUDE>();
     mavlink_msg_attitude_pack(ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, esp_timer_get_time()/1000, 
                                         attitude.roll  * DEG_TO_RAD, //roll
                                         attitude.pitch * DEG_TO_RAD, //pitch
@@ -664,7 +662,7 @@ void Mavlink::on_timer_tick()
     static uint32_t last_itow = 0;     // 마지막으로 전송한 iTOW 저장
 
     if (step == 1 || step == 8 || step == 9){                        
-        m_gps =  sharedData.get_shared_data<Controller::Data_type::DT_GPS_DATA>();    
+        m_gps =  Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_GPS_DATA>();    
     }
     switch (step) {
         case 0:{ // 하트비트 전송
@@ -805,8 +803,7 @@ esp_err_t Mavlink::initialize()
 
     // 중요........
     // timer의 callback과 연결하여 on_timer_tick를 타이머에의해서 실행함.
-    Service::Timer& timer = Service::Timer::get_instance();
-    timer.set_timer_callback([this](){on_timer_tick();});
+    Service::Timer::get_instance().set_timer_callback([this](){on_timer_tick();});
 
     _initialized = true;
     ESP_LOGI(TAG,"Initialized successfully.");

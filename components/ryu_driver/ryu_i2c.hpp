@@ -23,8 +23,8 @@ class I2C{
 
         static inline constexpr uint32_t       I2C_SPEED   = 400'000;
         static inline constexpr gpio_port_t    I2C_PORT    = gpio_port_t(0);
-        static inline constexpr gpio_num_t     I2C_SDA     = GPIO_NUM_8; // 숫자에 직접 타입을 지정
-        static inline constexpr gpio_num_t     I2C_SCL     = GPIO_NUM_9;
+        static inline constexpr gpio_num_t     I2C_SDA     = GPIO_NUM_4; // 숫자에 직접 타입을 지정
+        static inline constexpr gpio_num_t     I2C_SCL     = GPIO_NUM_5;
 
 
         i2c_master_bus_handle_t get_bus_handle(){return _bus_handle;};

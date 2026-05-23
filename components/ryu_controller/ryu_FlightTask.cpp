@@ -9,11 +9,13 @@
 #include "ryu_SharedDataManager.hpp"
 #include "ryu_KalmanFilter.hpp"
 #include "ryu_ImuSensorTask.hpp"
+#include "ryu_MagSensorTask.hpp"
 #include "ryu_BaroSensorTask.hpp"
 #include "ryu_espnow.hpp"
 #include "ryu_mavlink.hpp"
 #include "ryu_timer.hpp"
 #include "ryu_battery.hpp"
+#include "ryu_gps.hpp"
 
 namespace Controller {
 
@@ -22,15 +24,27 @@ esp_err_t Flight::initialize(){
     if (!Driver::Battery::get_instance().is_initialized()){
         err = Driver::Battery::get_instance().initialize();
     }
-
+    
     if(!SharedDataManager::getInstance().is_initialized()){
         err = SharedDataManager::getInstance().initialize();
+    }
+
+    if(!Sensor::Gps::getInstance().is_initialized()){
+        Sensor::Gps::getInstance().initialize();
+        Sensor::Gps::getInstance().StartTask();
     }
 
     if(!ImuSensorTask::getInstance().is_initialized()){
         err = ImuSensorTask::getInstance().initialize();
         ImuSensorTask::getInstance().StartTask();
     }
+
+    if(!MagSensorTask::getInstance().is_initialized()){
+        MagSensorTask::getInstance().initialize();
+        MagSensorTask::getInstance().StartTask();
+    }
+
+
 
     if(!BaroSensorTask::getInstance().is_initialized()){
         err = BaroSensorTask::getInstance().initialize();
@@ -75,7 +89,7 @@ void Flight::flight_task(void *pvParameters)
 
     uint32_t loop_cnt = 0;        
     SensorData cur_imu_data {};
-    
+    Vector3f   cur_mag_data {};
     ESP_LOGI(TAG, "Flight 제어 태스크가 Core 1에서 완벽한 데이터 동기화 모드로 가동되었습니다.");
     //SensorTask의 준비되어질 시간을 기다려줌. 300이면 1~2ms가 부족하다
     vTaskDelay(pdMS_TO_TICKS(320));
@@ -94,9 +108,14 @@ void Flight::flight_task(void *pvParameters)
                 continue; 
             }
 
-            // [중계자 활용] 뮤텍스 락 없이 원자적으로 0마이크로초 만에 최신 IMU 데이터 복사
-            //sharedData.get_latest_imu(cur_imu_data);
+
             cur_imu_data = sharedData.get_shared_data< Data_type::DT_IMU_DATA>();
+
+            //ist8310작동시 ist8310의 데이터로 대치
+            if(sharedData.is_mag_updated()){
+                cur_mag_data = sharedData.get_shared_data< Data_type::DT_MAG_DATA>();
+                cur_imu_data.mag = cur_mag_data;   // 지자계를 대체한다.
+            }
             
             // 입력 데이터 가공 (입력이 도/초 단위일 경우 예측부 라디안 스케일링 일치 처리)
             Vector3f gyro_rad = cur_imu_data.gyro * DEG_TO_RAD;
@@ -133,13 +152,14 @@ void Flight::flight_task(void *pvParameters)
 
             // [중계자 복귀] 최종 수렴된 현재 수평 자세를 데이터 매니저에 즉시 업데이트
             sharedData.publish_data<Data_type::DT_CURRENT_ATTITUDE>(attitude);
+            
             BaroData baroData{};
             if(sharedData.is_baro_updated()){ //40ms단위로 데이터가 들어온다.
                 baroData =  sharedData.get_shared_data<Data_type::DT_BARO_DATA>();
-                ESP_LOGI(TAG, "|R: %8.5f |P: %8.5f |Y: %8.5f| gnd_pressure : %8.5f | pressure: %8.5f | alt:%8.5f | climb_rate: %8.5F", 
-                        attitude.roll,        attitude.pitch,       attitude.yaw,
-                        baroData.gnd_pressure ,baroData.pressure, baroData.altitude,baroData.climb_rate
-                        );
+                // ESP_LOGI(TAG, "|R: %8.5f |P: %8.5f |Y: %8.5f| gnd_pressure : %8.5f | pressure: %8.5f | alt:%8.5f | climb_rate: %8.5F", 
+                //         attitude.roll,        attitude.pitch,       attitude.yaw,
+                //         baroData.gnd_pressure ,baroData.pressure, baroData.altitude,baroData.climb_rate
+                //         );
             }
             // 여기에 추후 PID 제어 루프를 탑재하시면 됩니다.
             // run_pid_control(attitude, cur_imu_data.gyro);

@@ -37,10 +37,11 @@ class IST8310{
         esp_err_t initialize();
         esp_err_t deinitialize();
         esp_err_t updateSample(Vector3f &sample);
+        esp_err_t read_data(Vector3f& data);
+        void align_NED(Vector3f &data);
+        
         bool is_initialized(){return _initialized;};
         bool is_data_ready();
-        esp_err_t read_data(Vector3f data);
-        esp_err_t read_with_offset(Vector3f data);
         void calibrate_hard_iron();
 
     private:
@@ -56,7 +57,7 @@ class IST8310{
         static inline constexpr uint8_t PDCNTL      =    0x42; // Pulse Duration 제어
         static inline constexpr uint8_t CROSSAXIS1  =    0x48; // 
         static inline constexpr uint8_t CROSSAXIS2  =    0x49; // 
-         static inline constexpr uint8_t STAT1_DRDY_MASK = 0x01; 
+        static inline constexpr uint8_t STAT1_DRDY_MASK = 0x01; 
         // 센서 감도: 1320 LSB/Gauss (0.3 µT/LSB)
 
         static inline constexpr float SENSITIVITY   =  0.3f;   
@@ -72,7 +73,6 @@ class IST8310{
         Vector3f _mag_offset ={MAG_OFFSET_X,MAG_OFFSET_Y,MAG_OFFSET_Z};
         Vector3f _mag_scale ={MAG_SCALE_X,MAG_SCALE_Y,MAG_SCALE_Z};
         Vector3f _mag_previous {};
-
         bool _initialized = false;
 };
 

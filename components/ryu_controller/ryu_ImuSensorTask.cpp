@@ -22,6 +22,24 @@ esp_err_t ImuSensorTask::initialize()
     esp_err_t err = ESP_OK;
     if (_initialized) return err;
 
+    if(!Driver::SPI::getInstance().is_initialized()){
+        Driver::SPI::getInstance().initialize();
+    }
+
+    Interface::IBus* imu_interface = Interface::createBIF(Driver::SPI::getInstance().get_host(), SPI_CS_PIN);
+
+    if(!Sensor::ICM20948::getInstance().is_initialized()){
+        Sensor::ICM20948::getInstance().set_bus(imu_interface);
+        Sensor::ICM20948::getInstance().initialize();
+        Sensor::ICM20948::getInstance().enable_mag_bypass();
+        Sensor::ICM20948::getInstance().set_include_mag(true);  // ak09916포함
+    }
+
+    if(!SharedDataManager::getInstance().is_initialized()){
+        SharedDataManager::getInstance().initialize();
+    }
+
+
 
     _initialized = true;
     return err;
@@ -29,37 +47,18 @@ esp_err_t ImuSensorTask::initialize()
 
 void ImuSensorTask::readImuSensorTask(void* pvParameters) {
     ESP_LOGI(TAG, "ImuSensor가 Core %d에서 시작되었습니다.", xPortGetCoreID());
-
-    ImuSensorTask* task = static_cast<ImuSensorTask*>(pvParameters);
-
-    // 1. SPI 드라이버 및 인터페이스 초기화
-    Driver::SPI& spi = Driver::SPI::getInstance();
-    spi.initialize();
-
-    Interface::IBus* imu_interface = Interface::createBIF(spi.get_host(), SPI_CS_PIN);
-    
-    auto& icm20948 = Sensor::ICM20948::getInstance();
-    icm20948.set_bus(imu_interface);
-    icm20948.initialize();
-    icm20948.enable_mag_bypass();
-    icm20948.set_include_mag(true);  // ak09916포함
-
-
-    // 싱글톤 중계 데이터 매니저 포인터 바인딩 완료
-    auto& data_manager = SharedDataManager::getInstance();
-  
-    // 2. 부팅 직후 센서 0점 교정 안내
     ESP_LOGI(TAG, "센서 0점 교정을 시작합니다. 기체를 평평한 곳에 두고 움직이지 마세요.");
-    
+ 
+    ImuSensorTask* task = static_cast<ImuSensorTask*>(pvParameters);
+    auto& icm20948 = Sensor::ICM20948::getInstance();
+  
     int communication_fail_count = 0; 
     int cal_sample_count = 0;
-
-    // 1kHz 주기 제어 설정 (1ms)
-    TickType_t xLastWakeTime;
-    const TickType_t xFrequency = pdMS_TO_TICKS(1); 
-    xLastWakeTime = xTaskGetTickCount(); 
+    
     esp_err_t err = ESP_OK;
-    // 3. 실전 비행 데이터 초고속 수집 및 캘리브레이션 무한 루프
+    // 1kHz 주기 제어 설정 (1ms)
+    const TickType_t xFrequency = pdMS_TO_TICKS(1); 
+    TickType_t xLastWakeTime = xTaskGetTickCount();     
     while (true) {
         SensorData imu_data {};
 
@@ -76,10 +75,9 @@ void ImuSensorTask::readImuSensorTask(void* pvParameters) {
                 // 교정 중인 상태 로그 출력 (지나친 로그 방지를 위해 100번에 한 번씩)
                 if (cal_sample_count % 100 == 0) {
                     ESP_LOGI(TAG, "센서 교정 중... (%d / %d)", cal_sample_count, icm20948.CALIBRATION_COUNT);
-                }
-                
+                }                
                 if (icm20948.is_calibration()) {
-                    data_manager.set_imu_calibrated(true);
+                    SharedDataManager::getInstance().set_imu_calibrated(true);
                     ESP_LOGI(TAG, "센서 0점 교정 완료! 정상 데이터 수집 및 필터링을 시작합니다.");
                 }
             } 
@@ -88,15 +86,10 @@ void ImuSensorTask::readImuSensorTask(void* pvParameters) {
                 icm20948.apply_filter(imu_data);
             }
             icm20948.align_NED(imu_data);            
-            // [중계자 복사] 뮤텍스 락 오버헤드가 제거된 고속 대입 채널 전송
-            //task->_data_manager->update_latest_imu(imu_data);
-            data_manager.publish_data<Data_type::DT_IMU_DATA>(imu_data);
-            // [초고속 저지연 파이프라인] 데이터 준비가 완료되었으므로 Core 1에서 대기 중인 비행 태스크를 즉시 무오래 깨움
-            //auto flight_handle = data_manager.get_flight_task_handle();
+            SharedDataManager::getInstance().publish_data<Data_type::DT_IMU_DATA>(imu_data);
 
-            auto flight_handle = Flight::getInstance().getTaskHandle();
-            if (flight_handle != nullptr) {
-                xTaskNotifyGive(flight_handle);
+            if (Flight::getInstance().getTaskHandle() != nullptr) {
+                xTaskNotifyGive(Flight::getInstance().getTaskHandle());
             }
         } 
         else {
@@ -109,10 +102,6 @@ void ImuSensorTask::readImuSensorTask(void* pvParameters) {
                 // task->_data_manager->trigger_emergency_stop();
             }
         }
-
-
-
-
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
