@@ -27,7 +27,6 @@ class BMP388{
         BMP388& operator=(const BMP388&) = delete;
         ~BMP388();
 
-
         // 인터페이스 주입 (핵심!)
         void set_bus(Interface::IBus* bus);
         Interface::IBus* get_bus(){ return _ibus;};    
@@ -39,13 +38,8 @@ class BMP388{
         
         esp_err_t initialize() ;
         esp_err_t deinitialize();
-
+        esp_err_t get_pressure(float *pressure);        
         bool is_initialized(){return _initialized;};
-
-        esp_err_t calibrate_ground_pressure(float *ground_pressure);
-        float get_ground_pressure(){return _ground_pressure;};
-        esp_err_t get_relative_altitude(float *filtered_alt);
-        float get_climb_rate() { return _climb_rate; };
         bool is_data_ready();
 
     private:
@@ -78,22 +72,14 @@ class BMP388{
         // bmp388에서 읽은 raw data.
         uint32_t uncomp_temp  = 0;
         uint32_t uncomp_press = 0;
-
-        float _ground_pressure   = 1013.25f; // 초기값, 보정 후 업데이트됨
-        float _current_alt       = 0.0f; // 현재 고도
-        float _filtered_alt      = 0.0f; // 고도 필터링용
-        float _last_altitude     = 0.0f;  // 이전 고도 저장용
-        float _climb_rate        = 0.0f; // 상승 속도  
         
         // 정상으로 읽은 이전값   현재 데이터가 잘못되면 이전값을 내어준다.      
         uint32_t    adc_p_last = 0, 
                     adc_t_last = 0;
                     
-        void update_climb_rate();
         void init_coefficients();
-        esp_err_t  read_calib();
-        inline esp_err_t read_bmp388(uint32_t *adcp, uint32_t *adct);
-        esp_err_t get_pressure(float *pressure);        
+        inline esp_err_t  read_calib();
+        inline esp_err_t  read_bmp388(uint32_t *adcp, uint32_t *adct);
        
         bool _initialized = false;
     };

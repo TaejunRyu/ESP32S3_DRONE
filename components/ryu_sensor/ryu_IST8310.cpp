@@ -144,9 +144,7 @@ esp_err_t IST8310::read_data(Vector3f data)
 {
 
     uint8_t rx_buf[6] = {0};
-
     Vector3f raw_data{};    
-    
     esp_err_t err = _ibus->Read(DATA_X_L,rx_buf,6);
 
     // 2. I2C 통신 실패 시 방어 코드
@@ -179,11 +177,11 @@ esp_err_t IST8310::read_data(Vector3f data)
     return ESP_OK;
 }
 
+
 esp_err_t IST8310::read_with_offset(Vector3f data)
 {
     Vector3f raw{};
     auto err = this->read_data(raw);
-
     raw = (raw - _mag_offset) * _mag_scale;
     raw.normalize();    
     // X를 (-)부호를 해야지 Mahony를 통과

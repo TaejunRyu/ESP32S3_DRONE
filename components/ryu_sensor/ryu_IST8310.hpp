@@ -76,8 +76,4 @@ class IST8310{
         bool _initialized = false;
 };
 
-
-
-
-
 }

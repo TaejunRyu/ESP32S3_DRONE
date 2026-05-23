@@ -221,7 +221,7 @@ void EspNow::mavlink_tx_task(void *pvParameters)
     }    
 }
 
-BaseType_t EspNow::start_task()
+BaseType_t EspNow::StartTask()
 {
     auto res = xTaskCreatePinnedToCore(mavlink_tx_task, "mavlink_tx_task", 4096, this, 15,&_task_handle, 0);
     if (res != pdPASS){ 

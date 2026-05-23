@@ -73,27 +73,20 @@ class  Gps{
         static inline constexpr gpio_num_t GPS_RX      = GPIO_NUM_16;  // UART1 
         static inline constexpr gpio_num_t GPS_TX      = GPIO_NUM_17;
 
-        //SemaphoreHandle_t xGpsMutex = nullptr;
-        Health Gps_status = Health::HEALTHY;
+        Health _status = Health::HEALTHY;
 
         esp_err_t initialize();
         bool is_initialized(){return _initialized;};
         Health check_gps_health(const gps_data_t& m_gps);
-        void calculate_ubx_checksum(uint8_t* data, int len, uint8_t* ck_a, uint8_t* ck_b);
         uint8_t checkDataReliability(ubx_nav_pvt_t *pvt);
-        void gpsUbxData_To_gpsUserData(ubx_nav_pvt_t gpsUbx, gps_data_t gpsUser);
+        void calculate_ubx_checksum(uint8_t* data, int len, uint8_t* ck_a, uint8_t* ck_b);
         static void gps_ubx_mode_task(void *pvParameters);
-        BaseType_t start_task();
+        BaseType_t StartTask();
 
     private:
         TaskHandle_t _task_handle = nullptr;
         bool _initialized = false;
 };
-
-
-
-
-
 
 }
 

@@ -27,13 +27,6 @@ esp_err_t BMP388::initialize()
 
     if(_ibus == nullptr) return ESP_FAIL; // 인터페이스 주입 확인
 
-// [질문자님 가이드 반영] 1바이트를 안전하게 읽기 위해 '더미 안착용' 2바이트 배열 선언
-    uint8_t id_check_buf[2] = {0}; 
-    
-    // 1. 초기 래치 해제용 CHIP_ID 공회전 (2바이트 요청)
-    _ibus->Read(0x00, id_check_buf, 2);
-    vTaskDelay(pdMS_TO_TICKS(20)); 
-
     // 2. Soft Reset 수행
     err = _ibus->Write(0x7E, 0xB6);
     if (err != ESP_OK) return err;
@@ -49,10 +42,14 @@ esp_err_t BMP388::initialize()
     
     if (err != ESP_OK || actual_chip_id != 0x50) {
         ESP_LOGE(TAG, "CHIP_ID Verification Failed! Read Dummy[0]: 0x%02X, Actual_ID[1]: 0x%02X (Expected: 0x50)", 
-                 chip_id_buf[0], actual_chip_id);
+                 chip_id_buf[1], actual_chip_id);
         return ESP_FAIL; // 이 검증선이 뚫려야 센서가 정상 동작합니다.
     }
-    ESP_LOGI(TAG, "BMP388 Hardware Connection Perfectly Verified! Chip ID: 0x%02X", actual_chip_id);
+    // ESP_LOGW(TAG,"chip_id_buf[0] : 0x%02X",chip_id_buf[0]);
+    // ESP_LOGW(TAG,"chip_id_buf[1] : 0x%02X",chip_id_buf[1]);
+
+    // ESP_LOGI(TAG, "BMP388 Hardware Connection Perfectly Verified! Chip ID: 0x%02X", actual_chip_id);
+
 
     // 4. Sleep Mode 진입 후 정석 설정값들 순서대로 주입
     _ibus->Write(0x1B, 0x00);
@@ -76,14 +73,6 @@ esp_err_t BMP388::initialize()
     if (err != ESP_OK) return err;
     
     vTaskDelay(pdMS_TO_TICKS(50)); // 첫 데이터 측정 필터링 적재 시간 휴식
-
-    // 6. 교착 상태 해제를 위한 초기 지상 기압 획득
-    float temp_press = 0.0f;
-    for (int i = 0; i < 5; ++i) {
-        get_pressure(&temp_press);
-        vTaskDelay(pdMS_TO_TICKS(5));
-    }
-    _ground_pressure = (temp_press > 600.0f && temp_press < 1150.0f) ? temp_press : 1013.25f;
 
     _initialized = true;
     return ESP_OK;
@@ -114,10 +103,10 @@ esp_err_t BMP388::deinitialize()
 esp_err_t BMP388::read_calib()
 {
    // 질문자님의 통찰 반영: 21바이트 데이터를 위해 22바이트 배열 선언
-    uint8_t d[23] = {0}; 
+    uint8_t d[22] = {0}; 
     
     // 0x13번지부터 더미 포함 22바이트 연속 로드
-    esp_err_t ret = _ibus->Read(0x13, d, 23); 
+    esp_err_t ret = _ibus->Read(0x31, d, 22); 
     if (ret != ESP_OK) return ret;
     
     // 0번 인덱스(d[0])는 보쉬 SPI 필수 더미 바이트이므로 패스, 1번 인덱스부터 사용
@@ -144,71 +133,10 @@ esp_err_t BMP388::read_calib()
     _coef.p10 = (int8_t)d[o + 19];
     _coef.p11 = (int8_t)d[o + 20];
     // read_calib() 내부 맨 하단에 추가
-ESP_LOGW("CALIB_RAW", "d[1]:0x%02X, d[2]:0x%02X | d[6]:0x%02X, d[7]:0x%02X", d[1], d[2], d[6], d[7]);
-ESP_LOGW("CALIB_COEF", "t1:%u, t2:%u, p1:%d, p2:%d", _coef.t1, _coef.t2, _coef.p1, _coef.p2);
+    // ESP_LOGW("CALIB_RAW", "d[1]:0x%02X, d[2]:0x%02X | d[6]:0x%02X, d[7]:0x%02X", d[1], d[2], d[6], d[7]);
+    // ESP_LOGW("CALIB_COEF", "t1:%u, t2:%u, p1:%d, p2:%d", _coef.t1, _coef.t2, _coef.p1, _coef.p2);
 
     return ESP_OK;
-}
-
-
-void BMP388::update_climb_rate(){
-    // 현재 진행되어지는 고도는 fitered_alt가지고 작업 진행중...
-    float raw_rate = (_filtered_alt - _last_altitude) / 0.020f; // 50Hz = 0.020s  , 40hz = 0.025s
-    
-    _last_altitude = _filtered_alt;
-    // 속도 필터 (기압계 노이즈 제거용)
-    _climb_rate = (_climb_rate * 0.8f) + (raw_rate * 0.2f);
-    
-}
-
-
-
-esp_err_t BMP388::calibrate_ground_pressure(float* ground_pressure)
-{
-    float sum = 0;
-    int count = 0;
-    int attempts = 0; // 무한 루프 방지용
-    int error_count = 0;
-
-    ESP_LOGI(TAG, "✓ Start ground pressure correction (100 samplings)...");
-
-    // 1. 센서 안정화를 위해 첫 데이터는 읽고 버림
-    float pressure{};
-    auto ret_code = get_pressure(&pressure);
-    vTaskDelay(pdMS_TO_TICKS(20)); // 50Hz 샘플링
-
-    while(count < 100 && attempts < 200) { // 최대 200번 시도
-        ret_code= get_pressure(&pressure);
-        
-        if (pressure > 800.0f && pressure < 1200.0f) { // 좀 더 타이트한 유효 범위 (지상 기준)
-            sum += pressure;
-            count++;
-        } else {
-            error_count ++;
-            ESP_LOGW(TAG, "Detecting incorrect pressure values: %.2f hPa", pressure);
-        }
-        attempts++;
-        vTaskDelay(pdMS_TO_TICKS(20)); // 50Hz 샘플링
-
-        if (count % 25 == 0 && count > 0) {
-            ESP_LOGD(TAG, "보정 진행률: %d%%", count);
-        }
-        if(error_count > 10) {
-            ESP_LOGE(TAG, "❌ Ground pressure correction failed (sensor check needed)");
-            *ground_pressure = 0.0f;
-            return ret_code;
-        }
-    }
-
-    if (count >= 50) { // 최소 50개 이상의 유효 샘플 확보 시
-        _ground_pressure = sum / (float)count;
-        ESP_LOGI(TAG, "✓ Ground pressure setting complete: %.2f hPa (Samples: %d)",_ground_pressure, count);
-        *ground_pressure = _ground_pressure;
-        return ret_code;
-    }
-    ESP_LOGE(TAG, "❌ Ground pressure correction failed (sensor check needed)");
-    *ground_pressure = 0.0f;
-    return ret_code;
 }
 
 /**
@@ -222,15 +150,17 @@ bool BMP388::is_data_ready()
     // 4번째 bit : press  ready
     // 5번째 bit : temperature ready
     // 110000(2진수)   ==>  0x30
-    uint8_t status = 0;
+    uint8_t status[2]{};
     uint8_t temp_bit  = 1<<5;
     uint8_t press_bit = 1<<4;
     uint8_t sum_mask = temp_bit | press_bit;
 
     // 타임아웃은 아주 짧게(1~2ms)
-    esp_err_t err = _ibus->Read(this->STATUS,&status,1);
+    esp_err_t err = _ibus->Read(this->STATUS,status,2);
     if ( err == ESP_OK) {
-        return ((status & sum_mask) == sum_mask); // 압력(0x10)과 온도(0x20) 모두 준비됨 확인
+        // ESP_LOGW(TAG,"status[0]:0x%02X",status[0]);
+        // ESP_LOGW(TAG,"status[1]:0x%02X",status[1]);
+        return ((status[1] & sum_mask) == sum_mask); // 압력(0x10)과 온도(0x20) 모두 준비됨 확인
     }
     return false;
 }
@@ -295,10 +225,8 @@ esp_err_t BMP388::get_pressure(float * pressure)
         float comp_press = partial_out1 + partial_out2 + d4;
 
         *pressure = static_cast<float>(comp_press * 0.01f);
-
    
- ESP_LOGI("BMP_DIAG", "pressure:%8.3f", *pressure);
-
+        //ESP_LOGI("BMP_DIAG", "pressure:%8.3f", *pressure);
 
         return ret_code; // Pa -> hPa
     } else {
@@ -306,38 +234,6 @@ esp_err_t BMP388::get_pressure(float * pressure)
         return ret_code;
     }
 }
-
-esp_err_t BMP388::get_relative_altitude(float * filtered_alt)
-{
-    if (this->_ground_pressure <= 500.0f) {
-        ESP_LOGE(TAG, "Error => Verify Ground Pressure..."); // 에러 종류 확인
-        *filtered_alt = 0.0f;
-        return ESP_FAIL; // 비정상적인 지면 기압 차단
-    }
-    float pressure{};
-    auto ret_code = get_pressure(&pressure);
-    
-    if (ret_code != ESP_OK || pressure <= 500.0f ){
-        *filtered_alt =_last_altitude;
-        return ret_code; // 일시적 오류 시 이전 값 유지
-    }
-
-    // 고도 계산 공식 (ISA 모델)
-    _current_alt = 44'330.0f * (1.0f - powf(pressure / _ground_pressure, 0.190295f));
-
-    // 간단한 1차 저주파 필터 (Alpha: 0.1 ~ 0.3 권장)
-    // 노이즈를 줄이고 부드러운 고도 변화를 만듭니다.
-    const float alpha = 0.2f; 
-    _filtered_alt = (_current_alt * alpha) + (_last_altitude * (1.0f - alpha));
-    
-    _last_altitude = _filtered_alt;
-
-    update_climb_rate();
-    *filtered_alt = _filtered_alt;
-    return ret_code;
-}
-
-
 
 esp_err_t BMP388::read_bmp388(uint32_t* adcp,uint32_t* adct){
       // 📢 통찰 반영: 원하는 길이(6)보다 1바이트 더 길게 잡음 (더미 안착용)
@@ -357,9 +253,9 @@ esp_err_t BMP388::read_bmp388(uint32_t* adcp,uint32_t* adct){
     *adcp = adc_p;
     *adct = adc_t;
     
-//  ESP_LOGI("BMP_DIAG", "RAW ADC -> P: %u (0x%06X) | T: %u (0x%06X)", 
-//              (unsigned int)adc_p, (unsigned int)adc_p, 
-//              (unsigned int)adc_t, (unsigned int)adc_t);
+    //  ESP_LOGI("BMP_DIAG", "RAW ADC -> P: %u (0x%06X) | T: %u (0x%06X)", 
+    //              (unsigned int)adc_p, (unsigned int)adc_p, 
+    //              (unsigned int)adc_t, (unsigned int)adc_t);
 
     return ret;
 }

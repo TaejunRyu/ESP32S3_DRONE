@@ -29,13 +29,7 @@ template <> struct DataTypeTraits<Data_type::DT_GPS_DATA>           { using Type
 class SharedDataManager {
 private:
     static constexpr const char* TAG = "SharedDataManager";    
-    
-    SharedDataManager() {
-        _is_imu_calibrated.store(false, std::memory_order_relaxed);
-        _is_baro_updated.store(false, std::memory_order_relaxed);
-        _is_mag_updated.store(false, std::memory_order_relaxed);
-    }
-
+    SharedDataManager(){}
     // [Writers 제약 조건] 
     // 본 더블 버퍼 구조는 각 Data_type별로 데이터를 쓰는 태스크(Writer)가 '단 1개'일 때만 원자성이 보장됩니다.
     SensorData _imu_buffer[2]      = {};
@@ -55,8 +49,22 @@ private:
     std::atomic<bool> _is_imu_calibrated;
     std::atomic<bool> _is_baro_updated;
     std::atomic<bool> _is_mag_updated;
+    std::atomic<bool> _is_gps_updated;
 
+    bool _initialized = false;
 public:
+    esp_err_t initialize(){
+        if (_initialized) return ESP_OK;
+        _is_imu_calibrated.store(false, std::memory_order_relaxed);
+        _is_baro_updated.store(false, std::memory_order_relaxed);
+        _is_mag_updated.store(false, std::memory_order_relaxed);        
+        _is_gps_updated.store(false, std::memory_order_relaxed);        
+        _initialized = true;
+        return ESP_OK;
+    };
+    bool is_initialized(){return _initialized;};
+
+
     // 🔴 중요: static 객체의 정상 소멸을 위해 public으로 이동
     ~SharedDataManager() = default; 
 
@@ -133,6 +141,9 @@ public:
 
     void set_mag_updated(bool state) { _is_mag_updated.store(state, std::memory_order_release); }
     bool is_mag_updated() { return _is_mag_updated.exchange(false, std::memory_order_acq_rel); } 
+
+    void set_gps_updated(bool state) { _is_gps_updated.store(state, std::memory_order_release); }
+    bool is_gps_updated() { return _is_gps_updated.exchange(false, std::memory_order_acq_rel); } 
 };
 
 } // namespace Controller

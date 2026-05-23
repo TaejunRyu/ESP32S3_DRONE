@@ -19,7 +19,39 @@ namespace Controller {
 
 esp_err_t Flight::initialize(){
     esp_err_t err = ESP_OK;
-    err = Driver::Battery::get_instance().initialize();
+    if (!Driver::Battery::get_instance().is_initialized()){
+        err = Driver::Battery::get_instance().initialize();
+    }
+
+    if(!SharedDataManager::getInstance().is_initialized()){
+        err = SharedDataManager::getInstance().initialize();
+    }
+
+    if(!ImuSensorTask::getInstance().is_initialized()){
+        err = ImuSensorTask::getInstance().initialize();
+        ImuSensorTask::getInstance().StartTask();
+    }
+
+    if(!BaroSensorTask::getInstance().is_initialized()){
+        err = BaroSensorTask::getInstance().initialize();
+        BaroSensorTask::getInstance().StartTask();
+    }
+
+    if(!Service::EspNow::get_instance().is_initialized()){
+        Service::EspNow::get_instance().initialize();
+        Service::EspNow::get_instance().StartTask();
+        Service::EspNow::get_instance().connect_callback();
+    }
+
+    if(!Service::Timer::get_instance().is_initialized()){
+        Service::Timer::get_instance().intiallize();
+        Service::Timer::get_instance().Start();
+    }
+
+    if(!Service::Mavlink::get_instance().is_initialized()){
+        Service::Mavlink::get_instance().initialize();
+        Service::Mavlink::get_instance().StartTask();
+    }
 
     return err;
 }
@@ -34,39 +66,15 @@ void Flight::flight_task(void *pvParameters)
     //Flight* flight = static_cast<Flight*>(pvParameters);
 
     // 1. 중계자 데이터 매니저 가져오기
-    SharedDataManager& sharedData = SharedDataManager::getInstance();
+    auto& sharedData = SharedDataManager::getInstance();
 
-    // 2. Core 0에서 구동될 센서 수집 태스크 가동
-    ImuSensorTask& sensorTask =  ImuSensorTask::getInstance();
-    sensorTask.StartTask();
-
-    BaroSensorTask& baroTask = BaroSensorTask::getInstance();
-    baroTask.initialize();
-    baroTask.StartTask();
-
-    // 3. 칼만 필터 코어 초기화 (NED 기준)
-    Filter::KalmanFilter& kalman = Filter::KalmanFilter::getInstance();
+    // 2. 칼만 필터 코어 초기화 (NED 기준)
+    auto& kalman = Filter::KalmanFilter::getInstance();
     kalman.init(0.0f, 0.0f, 0.0f);
 
-    // 4. 기타 비행 통신 및 타이머 서비스 가동
-    // Service::EspNow& espnow = Service::EspNow::get_instance();
-    // espnow.initialize();
-    // espnow.start_task();
-    // espnow.connect_callback();
 
-
-    Service::Timer& timer = Service::Timer::get_instance();
-    timer.intiallize();
-    timer.Start();
-
-    // Service::Mavlink& mavlink = Service::Mavlink::get_instance();
-    // mavlink.initialize();
-    // mavlink.start_task();
-    
-    uint32_t loop_cnt = 0;
-        
+    uint32_t loop_cnt = 0;        
     SensorData cur_imu_data {};
-    
     
     ESP_LOGI(TAG, "Flight 제어 태스크가 Core 1에서 완벽한 데이터 동기화 모드로 가동되었습니다.");
     //SensorTask의 준비되어질 시간을 기다려줌. 300이면 1~2ms가 부족하다
@@ -102,8 +110,15 @@ void Flight::flight_task(void *pvParameters)
             // 제어 및 외부 송신을 위해 도(Degree) 단위로 변환
             attitude = attitude * RAD_TO_DEG;
             
+            float TARGET_TRUE_NORTH = -7.7f; 
+            gps_data_t mgps{};
+            if(SharedDataManager::getInstance().is_gps_updated()){ // gps가 업데이트가 되었으면.
+                mgps = SharedDataManager::getInstance().get_shared_data<Data_type::DT_GPS_DATA>();
+                //TARGET_TRUE_NORTH = mgps.magDec;
+                TARGET_TRUE_NORTH = (TARGET_TRUE_NORTH * 0.999f) + (mgps.magDec * 0.001f);
+            }
+
             // [지리적 편각 보정] 진북에서 -7.7도 지점에 자북이 존재하므로 편각을 보정하여 진북 정렬
-            constexpr float TARGET_TRUE_NORTH = -7.7f; 
             attitude.yaw = attitude.yaw + TARGET_TRUE_NORTH;
             
             // Yaw 각도 범위를 0~360도로 정규화 바인딩
@@ -119,8 +134,12 @@ void Flight::flight_task(void *pvParameters)
             // [중계자 복귀] 최종 수렴된 현재 수평 자세를 데이터 매니저에 즉시 업데이트
             sharedData.publish_data<Data_type::DT_CURRENT_ATTITUDE>(attitude);
             BaroData baroData{};
-            if(sharedData.is_baro_updated()){
+            if(sharedData.is_baro_updated()){ //40ms단위로 데이터가 들어온다.
                 baroData =  sharedData.get_shared_data<Data_type::DT_BARO_DATA>();
+                ESP_LOGI(TAG, "|R: %8.5f |P: %8.5f |Y: %8.5f| gnd_pressure : %8.5f | pressure: %8.5f | alt:%8.5f | climb_rate: %8.5F", 
+                        attitude.roll,        attitude.pitch,       attitude.yaw,
+                        baroData.gnd_pressure ,baroData.pressure, baroData.altitude,baroData.climb_rate
+                        );
             }
             // 여기에 추후 PID 제어 루프를 탑재하시면 됩니다.
             // run_pid_control(attitude, cur_imu_data.gyro);
@@ -135,7 +154,7 @@ void Flight::flight_task(void *pvParameters)
             //             attitude.roll,        attitude.pitch,       attitude.yaw,
             //             baroData.pressure, baroData.altitude,baroData.climb_rate
             //         );
-            // }            
+            // }
         } else {
             // Failsafe 트리거: 5ms 동안 Core 0로부터 동기화 신호(Notification)가 누락된 상황 예외 처리
             // SensorTask에서 신호가 안오면 작동이 불능이 되므로 이곳이 실행되어진다.

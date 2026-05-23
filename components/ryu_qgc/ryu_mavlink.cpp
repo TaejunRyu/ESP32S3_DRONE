@@ -633,7 +633,7 @@ void Mavlink::inMessageQueueTask(void *pv)
     } //while(true)
 }
 
-void Mavlink::start_task()
+void Mavlink::StartTask()
 {
     auto res = xTaskCreatePinnedToCore(inMessageQueueTask, "inMessageQueueTask", 8192, this, 15,nullptr, 0);
     if (res != pdPASS) ESP_LOGE(TAG, "❌ inMessageQueueTask Task is failed! code: %d", res);
