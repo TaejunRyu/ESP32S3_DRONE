@@ -70,8 +70,8 @@ class  Gps{
         } __attribute__((packed));
 
         static inline constexpr uint32_t   GPS_UART_BAUD_RATE = 115200;
-        static inline constexpr gpio_num_t GPS_RX      = GPIO_NUM_1;  // 작동 안하면 rx tx 바꾸라....
-        static inline constexpr gpio_num_t GPS_TX      = GPIO_NUM_2;
+        static inline constexpr gpio_num_t GPS_RX      = GPIO_NUM_7;  // 작동 안하면 rx tx 바꾸라....
+        static inline constexpr gpio_num_t GPS_TX      = GPIO_NUM_6;
 
         Health _status = Health::HEALTHY;
 

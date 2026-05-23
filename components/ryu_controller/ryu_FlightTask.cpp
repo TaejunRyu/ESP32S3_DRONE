@@ -110,11 +110,14 @@ void Flight::flight_task(void *pvParameters)
 
 
             cur_imu_data = sharedData.get_shared_data< Data_type::DT_IMU_DATA>();
-
+            static Vector3f previousMag{};
             //ist8310작동시 ist8310의 데이터로 대치
             if(sharedData.is_mag_updated()){
-                cur_mag_data = sharedData.get_shared_data< Data_type::DT_MAG_DATA>();
-                cur_imu_data.mag = cur_mag_data;   // 지자계를 대체한다.
+                cur_mag_data = sharedData.get_shared_data< Data_type::DT_MAG_DATA>();                
+                //cur_imu_data.mag = cur_mag_data;   // 지자계를 대체한다.
+                //previousMag = cur_mag_data;
+            }else{ // 데이터를 일지 않을때에는 이전값을 보낸다.
+                //cur_imu_data.mag = previousMag;
             }
             
             // 입력 데이터 가공 (입력이 도/초 단위일 경우 예측부 라디안 스케일링 일치 처리)
@@ -129,21 +132,31 @@ void Flight::flight_task(void *pvParameters)
             // 제어 및 외부 송신을 위해 도(Degree) 단위로 변환
             attitude = attitude * RAD_TO_DEG;
             
-            float TARGET_TRUE_NORTH = -7.7f; 
-            gps_data_t mgps{};
-            if(SharedDataManager::getInstance().is_gps_updated()){ // gps가 업데이트가 되었으면.
-                mgps = SharedDataManager::getInstance().get_shared_data<Data_type::DT_GPS_DATA>();
-                //TARGET_TRUE_NORTH = mgps.magDec;
-                TARGET_TRUE_NORTH = (TARGET_TRUE_NORTH * 0.999f) + (mgps.magDec * 0.001f);
+            // [필수] TARGET_TRUE_NORTH는 반드시 태스크 내부 static 또는 클래스 멤버 변수여야 합니다.
+            // 초기값은 우리나라 평균 편각인 -7.7f (서편각 7.7도)로 시작합니다.
+            const static float target_true_north = TARGET_TRUE_NORTH; 
+
+            // 1. GPS가 업데이트 되었을 때만 지자기 편각 필터링 수행 (Low-Pass Filter)
+            if (SharedDataManager::getInstance().is_gps_updated()) {
+                gps_data_t mgps = SharedDataManager::getInstance().get_shared_data<Data_type::DT_GPS_DATA>();
+                
+                // GPS 가 정상 Fix 상태여야 magDec 신뢰도가 높습니다.
+                if (mgps.fixType >= 3 && mgps.horAcc < 3000) { 
+        
+                    // mgps.magDec는 이미 '도(Degree)' 단위이므로 스케일링 없이 그대로 필터 적용
+                    //target_true_north = (target_true_north * 0.999f) + (mgps.magDec * 0.001f);
+                }
             }
 
-            // [지리적 편각 보정] 진북에서 -7.7도 지점에 자북이 존재하므로 편각을 보정하여 진북 정렬
-            attitude.yaw = attitude.yaw + TARGET_TRUE_NORTH;
-            
+            // 3. 자북 방위각에 '단 한 번만' 편각을 더하여 진북 방위각 생성 (누적 방지)
+            float corrected_yaw = attitude.yaw + target_true_north;
+
             // Yaw 각도 범위를 0~360도로 정규화 바인딩
             if (attitude.yaw < 0.0f)           attitude.yaw += 360.0f;
             else if (attitude.yaw >= 360.0f)   attitude.yaw -= 360.0f;
 
+            // 5. 최종 보정된 진북 기준의 yaw를 자세 제어(PID) 알고리즘에 투입
+            attitude.yaw = corrected_yaw; 
 
             // QGC 모니터링 전용 Mavlink 버퍼 구조체 데이터 밀어넣기
             attitude.data[3] = cur_imu_data.gyro.x;
@@ -167,12 +180,12 @@ void Flight::flight_task(void *pvParameters)
             // [출력 가독성 최적화] UART 병목 및 로깅 오버헤드를 막기 위한 50Hz(20ms) 주기 필터링 로그
             // if (++loop_cnt >= 20) { 
             //     loop_cnt = 0;
-            //     ESP_LOGI(TAG, "|AX: %8.5f |AY: %8.5f |AZ: %8.5f | GX: %8.5f |GY: %8.5f |GZ: %8.5f | MX: %8.5f |MY: %8.5f |MZ: %8.5f |R: %8.5f |P: %8.5f |Y: %8.5f| pressure: %8.5f | alt:%8.5f |clib_rate:%8.5F", 
+            //     ESP_LOGI(TAG, "|AX: %8.5f |AY: %8.5f |AZ: %8.5f | GX: %8.5f |GY: %8.5f |GZ: %8.5f | MX: %8.5f |MY: %8.5f |MZ: %8.5f |R: %8.5f |P: %8.5f |Y: %8.5f|", 
             //             cur_imu_data.acc.x,   cur_imu_data.acc.y,   cur_imu_data.acc.z,
             //             gyro_rad.x,           gyro_rad.y,           gyro_rad.z,
             //             cur_imu_data.mag.x,   cur_imu_data.mag.y,   cur_imu_data.mag.z,
-            //             attitude.roll,        attitude.pitch,       attitude.yaw,
-            //             baroData.pressure, baroData.altitude,baroData.climb_rate
+            //             attitude.roll,        attitude.pitch,       attitude.yaw
+             
             //         );
             // }
         } else {

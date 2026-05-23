@@ -65,7 +65,7 @@ public:
     bool is_initialized(){return _initialized;};
 
 
-    // 🔴 중요: static 객체의 정상 소멸을 위해 public으로 이동
+    // 중요: static 객체의 정상 소멸을 위해 public으로 이동
     ~SharedDataManager() = default; 
 
     static SharedDataManager& getInstance() {

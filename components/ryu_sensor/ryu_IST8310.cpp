@@ -117,7 +117,6 @@ esp_err_t IST8310::updateSample(Vector3f &sample)
         sample    = (data -_mag_offset) * _mag_scale;
         _mag_previous =sample;   //정상으로 읽었을때 자료 보관.       
     }else{
-        //sample.is_mag_updated = false;
         sample = _mag_previous;
     }
     return err;
@@ -181,7 +180,7 @@ void IST8310::calibrate_hard_iron()
     Vector3f data{};
     ESP_LOGI(TAG, "지자계 보정 시작: 드론을 모든 방향(8자)으로 돌리세요 (약 30초)...");    
 
-    uint32_t total_count = 5000; 
+    uint32_t total_count = 50000; 
     uint32_t count = 0;
 
     while (count < total_count) {

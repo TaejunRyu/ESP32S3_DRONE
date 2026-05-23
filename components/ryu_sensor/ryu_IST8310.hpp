@@ -62,12 +62,13 @@ class IST8310{
 
         static inline constexpr float SENSITIVITY   =  0.3f;   
         
-        static inline constexpr float MAG_OFFSET_X  =  11.85f;
-        static inline constexpr float MAG_OFFSET_Y  =  4.35f;
-        static inline constexpr float MAG_OFFSET_Z  =  -15.30f;
-        static inline constexpr float MAG_SCALE_X   =  0.98f;
-        static inline constexpr float MAG_SCALE_Y   =  0.99f;
-        static inline constexpr float MAG_SCALE_Z   =  1.03f;
+        static inline constexpr float MAG_SCALE_X    = 1.0290;
+        static inline constexpr float MAG_SCALE_Y    = 0.8979;
+        static inline constexpr float MAG_SCALE_Z    = 1.0935;
+        static inline constexpr float MAG_OFFSET_X   = 23.1000;
+        static inline constexpr float MAG_OFFSET_Y   = -15.6000;
+        static inline constexpr float MAG_OFFSET_Z   = -26.5500;
+
         
         Interface::IBus* _ibus = nullptr; // 하드웨어 추상화 레이어
         Vector3f _mag_offset ={MAG_OFFSET_X,MAG_OFFSET_Y,MAG_OFFSET_Z};

@@ -108,32 +108,32 @@ void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
                 gpsFusedAlt = currentFilteredAlt;
 
                 // 3. GPS 데이터 이벤트 수신 및 상보 필터 융합
-                gps_data_t mGps{};
-                if(SharedDataManager::getInstance().is_gps_updated()){
-                    mGps = SharedDataManager::getInstance().get_shared_data<Data_type::DT_GPS_DATA>();
+                // gps_data_t mGps{};
+                // if(SharedDataManager::getInstance().is_gps_updated()){
+                //     mGps = SharedDataManager::getInstance().get_shared_data<Data_type::DT_GPS_DATA>();
                     
-                    if (mGps.fixType >= 3) { // 3D Fix 이상 신뢰 수준 확보 시
+                //     if (mGps.fixType >= 3) { // 3D Fix 이상 신뢰 수준 확보 시
                         
-                        if (!is_gps_home_set && cal_gndPressure) {
-                            gps_base_altitude = mGps.horMSL; 
-                            is_gps_home_set = true;
-                        }
+                //         if (!is_gps_home_set && cal_gndPressure) {
+                //             gps_base_altitude = mGps.horMSL; 
+                //             is_gps_home_set = true;
+                //         }
                         
-                        if (is_gps_home_set) {
-                            // GPS 기준 상대 고도 추출
-                            float gpsRelativeAlt = mGps.horMSL - gps_base_altitude;
+                //         if (is_gps_home_set) {
+                //             // GPS 기준 상대 고도 추출
+                //             float gpsRelativeAlt = mGps.horMSL - gps_base_altitude;
 
-                            // 장기 날씨 드리프트 감쇄용 99.8% : 0.2% 상보 필터 가동
-                            gpsFusedAlt = (currentFilteredAlt * 0.998f) + (gpsRelativeAlt * 0.002f);
+                //             // 장기 날씨 드리프트 감쇄용 99.8% : 0.2% 상보 필터 가동
+                //             gpsFusedAlt = (currentFilteredAlt * 0.998f) + (gpsRelativeAlt * 0.002f);
                             
-                            // 🛠️ [버그 정정 2] 물리 파이프라인 대통합 동기화
-                            // GPS 융합 결과를 기압계 고도 제어선들에도 똑같이 피딩해주어야 
-                            // 다음 루프 승강률(raw_rate) 계산 시 고도가 뚝뚝 끊기며 수직 점프하는 현상이 원천 차단됩니다.
-                            currentFilteredAlt = gpsFusedAlt;
-                            lastFilteredAlt = gpsFusedAlt; 
-                        }
-                    }
-                }
+                //             // 🛠️ [버그 정정 2] 물리 파이프라인 대통합 동기화
+                //             // GPS 융합 결과를 기압계 고도 제어선들에도 똑같이 피딩해주어야 
+                //             // 다음 루프 승강률(raw_rate) 계산 시 고도가 뚝뚝 끊기며 수직 점프하는 현상이 원천 차단됩니다.
+                //             currentFilteredAlt = gpsFusedAlt;
+                //             lastFilteredAlt = gpsFusedAlt; 
+                //         }
+                //     }
+                // }
 
                 // 4. 최종 정렬된 데이터를 갱신 발행
                 baro_buf.climb_rate     = climbRate;

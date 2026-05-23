@@ -643,152 +643,142 @@ void Mavlink::StartTask()
 
 void Mavlink::on_timer_tick()
 {
+    // 타이머 틱 카운터 변수 (0 ~ 9 루프)
     static uint8_t step = 0;
     mavlink_message_t msg;
 
-    // 10hz로 구분하고 있으므로 매번 처리...
-    Attitude_t attitude =  Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_CURRENT_ATTITUDE>();
-    mavlink_msg_attitude_pack(ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, esp_timer_get_time()/1000, 
-                                        attitude.roll  * DEG_TO_RAD, //roll
-                                        attitude.pitch * DEG_TO_RAD, //pitch
-                                        attitude.yaw   * DEG_TO_RAD, //yaw
-                                        attitude.gyro_x* DEG_TO_RAD, //gyro.x
-                                        attitude.gyro_y* DEG_TO_RAD, //gyro.y
-                                        attitude.gyro_z* DEG_TO_RAD  //gyro.y
+    // --- [최적화] 모든 데이터의 시간 동기화를 위해 진입 시점에 일괄 전송 데이터 캡처 ---
+    Attitude_t m_att     = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_CURRENT_ATTITUDE>();
+    gps_data_t m_gps     = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_GPS_DATA>();    
+    BaroData   m_alt     = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_BARO_DATA>();
+
+    // 10Hz 타이머 매 틱마다 자세(Attitude) 데이터는 상시 전송 (최우선순위 가시성 확보)
+    mavlink_msg_attitude_pack(ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, esp_timer_get_time()/1000, 
+                                m_att.roll  * DEG_TO_RAD, 
+                                m_att.pitch * DEG_TO_RAD, 
+                                m_att.yaw   * DEG_TO_RAD, 
+                                m_att.gyro_x* DEG_TO_RAD, 
+                                m_att.gyro_y* DEG_TO_RAD, 
+                                m_att.gyro_z* DEG_TO_RAD  
                             );
     send_mavlink_msg(&msg);
 
-    static gps_data_t m_gps={};
-    static uint32_t last_itow = 0;     // 마지막으로 전송한 iTOW 저장
-
-    if (step == 1 || step == 8 || step == 9){                        
-        m_gps =  Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_GPS_DATA>();    
-    }
+    // 스케줄러 분기 루프 시작
     switch (step) {
-        case 0:{ // 하트비트 전송
-            mavlink_msg_heartbeat_pack(ConfigMavlink::sys_id ,ConfigMavlink::comp_id ,&msg, 
+        case 0: { // 1. 하트비트 전송
+            mavlink_msg_heartbeat_pack(ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, 
                                         MAV_TYPE_QUADROTOR, 
-                                        //MAV_AUTOPILOT_GENERIC,
-                                        MAV_AUTOPILOT_PX4,
+                                        MAV_AUTOPILOT_PX4, // PX4 아키텍처 에뮬레이트 호환성 극대화
                                         _heartbeat.base_mode,  
                                         _heartbeat.custom_mode, 
                                         3);
             send_mavlink_msg(&msg);
             break;
         }
-        case 3:{ // 시스템 상태 전송 (배터리, 전압 등)
-            uint32_t sensors_present = 
-                        MAV_SYS_STATUS_SENSOR_3D_ACCEL | 
-                        MAV_SYS_STATUS_SENSOR_3D_ACCEL2 | // 두 번째 IMU 가속도
-                        MAV_SYS_STATUS_SENSOR_3D_GYRO |
-                        MAV_SYS_STATUS_SENSOR_3D_GYRO2 |
-                        MAV_SYS_STATUS_SENSOR_3D_MAG |
-                        MAV_SYS_STATUS_SENSOR_3D_MAG2| 
-                        MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE  |
-                        MAV_SYS_STATUS_SENSOR_DIFFERENTIAL_PRESSURE|
-                        MAV_SYS_STATUS_AHRS|
-                        MAV_SYS_STATUS_SENSOR_BATTERY|
-                        MAV_SYS_STATUS_SENSOR_RC_RECEIVER
-                        ;   // 두 번째 IMU 자이로
-            uint32_t sensors_enabled = sensors_present; // 모두 활성화됨
-            uint32_t sensors_health  = sensors_present;  // 모두 정상(Healthy)
 
-            // 1. CPU Load 계산 (0 ~ 1000 사이의 값으로 변환)
-            // 로그상 1700us / 2500us 라면 약 680이 됨
-            // auto& flight = Controller::Flight::get_instance();
-            //uint16_t load = (uint16_t)((flight.total_us * 1000) / LOOP_TIME);
-            // Flight의 정보를 가져와서 출력.
-            uint16_t load = ( 600.0f * 1000.0f) / LOOP_TIME;
+        case 1:
+        case 8: { // 2. 글로벌 위치 정보 전송 (잘린 코드 완벽 복구)
+            int32_t send_lat = 0;
+            int32_t send_lon = 0;
+            int32_t send_alt_msl = 0;
+
+            // 창가/실내 유령 좌표 널뛰기 현상 방지 가드링 설정
+            if (m_gps.fixType >= 3 && m_gps.horAcc < 4000) { 
+                send_lat = static_cast<int32_t>(m_gps.lat * 1e7);
+                send_lon = static_cast<int32_t>(m_gps.lon * 1e7);
+                send_alt_msl = static_cast<int32_t>(m_gps.horMSL); 
+            }
+
+            int32_t baro_alt_mm = static_cast<int32_t>(m_alt.altitude * 1000.0f); 
+
+            // 규격에 맞춰 누락되었던 마지막 3개 인자(velEast, velDown, hdg) 및 패킹 완성
+            mavlink_msg_global_position_int_pack(
+                ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, 
+                esp_timer_get_time() / 1000,    
+                send_lat,                       
+                send_lon,                       
+                send_alt_msl,                   
+                baro_alt_mm,                    
+                static_cast<int16_t>(m_gps.velNorth), 
+                static_cast<int16_t>(m_gps.velEast),  // 누락 복구
+                static_cast<int16_t>(m_gps.velDown),  // 누락 복구
+                static_cast<uint16_t>(m_att.yaw * 100.0f) // 누락 복구 및 uint16_t 규격 매칭
+            );
+            send_mavlink_msg(&msg);
+            break;
+        }
+
+        case 3: { // 3. 시스템 상태 전송 (배터리 및 CPU 부하)
+            uint32_t sensors_present = MAV_SYS_STATUS_SENSOR_3D_ACCEL | MAV_SYS_STATUS_SENSOR_3D_ACCEL2 | 
+                                       MAV_SYS_STATUS_SENSOR_3D_GYRO  | MAV_SYS_STATUS_SENSOR_3D_GYRO2  |
+                                       MAV_SYS_STATUS_SENSOR_3D_MAG   | MAV_SYS_STATUS_SENSOR_3D_MAG2   | 
+                                       MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE | MAV_SYS_STATUS_SENSOR_DIFFERENTIAL_PRESSURE |
+                                       MAV_SYS_STATUS_AHRS | MAV_SYS_STATUS_SENSOR_BATTERY | MAV_SYS_STATUS_SENSOR_RC_RECEIVER;
+            uint32_t sensors_enabled = sensors_present; 
+            uint32_t sensors_health  = sensors_present;  
+
+            uint16_t load = (600.0f * 1000.0f) / LOOP_TIME;
             auto& bat = Driver::Battery::get_instance();
-            // 2. 배터리 가짜 데이터 (12.6V, 10.5A, 85% 잔량)
-            uint16_t battery_voltage    = (uint16_t)(bat.get_battery_voltage() * 1000.0f); //mv
-            int16_t  current_battery    = 1050;   // [10mA 단위, 즉 10.5A]
-            int8_t   battery_remaining  = 85;    // [%]
-            uint16_t comms_drop_rate    = 0;     // 통신 패킷 드랍률 (0.01% 단위)
-            uint16_t comms_errors       = 0;        // 통신 에러 횟수
+            uint16_t battery_voltage   = (uint16_t)(bat.get_battery_voltage() * 1000.0f); 
+            int16_t  current_battery   = 1050;   
+            int8_t   battery_remaining = 85;    
+            uint16_t comms_drop_rate   = 0;     
+            uint16_t comms_errors      = 0;        
             
-            // 시스템 상태 패킷 구성 예시
             mavlink_msg_sys_status_pack(
-                ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, 
-                sensors_present, 
-                sensors_enabled, 
-                sensors_health,         // 센서 상태 비트마스크
-                load,        // CPU Load (0~1000)
-                battery_voltage, 
-                current_battery, 
-                battery_remaining, 
-                comms_drop_rate, 
-                comms_errors, 0, 0, 0, 0,0,0,0
+                ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, 
+                sensors_present, sensors_enabled, sensors_health,         
+                load, battery_voltage, current_battery, battery_remaining, 
+                comms_drop_rate, comms_errors, 0, 0, 0, 0, 0, 0, 0
             );
             send_mavlink_msg(&msg);
             break;
         }    
-        case 6:{ // 라디오 상태 전송 (RSSI, Noise)
+
+        case 6: { // 4. 라디오 전파 링크 상태 전송
              mavlink_msg_radio_status_pack_chan(
-                            ConfigMavlink::sys_id ,ConfigMavlink::comp_id ,MAVLINK_COMM_1, &msg, 
-                            Service::EspNow::get_instance().current_rssi, // 드론이 받은 브릿지의  신호
-                            0,0, Service::EspNow::get_instance().noise_floor, 0, 0, 0);
+                            ConfigMavlink::sys_id, ConfigMavlink::comp_id, MAVLINK_COMM_1, &msg, 
+                            Service::EspNow::get_instance().current_rssi, 
+                            0, 0, Service::EspNow::get_instance().noise_floor, 0, 0, 0);
             send_mavlink_msg(&msg);
             break;
         }
-        case 9:{ // gps 정보 
-            if (m_gps.home_alt > -9000.0f && m_gps.fixType >= 3) {
-                mavlink_msg_gps_raw_int_pack(
-                        ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, 
-                        esp_timer_get_time() / 1000,               
-                        m_gps.fixType,                              // 실제 Fix 타입을 그대로 전달 (0~4)                     
-                        static_cast<int32_t>(m_gps.lat * 1e7),      // 위도
-                        static_cast<int32_t>(m_gps.lon * 1e7),      // 경도
-                        static_cast<int32_t>(m_gps.horMSL), // 해발 고도 (MSL, mm)
-                        static_cast<uint16_t>(m_gps.pDOP),          
-                        static_cast<uint16_t>(m_gps.pDOP),          // VDOP 대신 pDOP 사용 가능
-                        static_cast<uint16_t>(m_gps.gndSpeed),        // 지표속도
-                        static_cast<uint16_t>(m_gps.headMotion),       // 이동방향
-                        static_cast<uint8_t>(m_gps.numSat),           // 위성수
-                        static_cast<int32_t>(m_gps.height),         // alt_ellipsoid (mm 단위 그대로)
-                        m_gps.horAcc,                                 // 수평 정확도 (mm)
-                        m_gps.verAcc,                                 // 수직 정확도 (mm)
-                        m_gps.speedAcc,                                 // 속도 정확도 (mm/s)
-                        0,                                          // hdg_acc – [degE5] Heading / track uncertainty
-                        static_cast<uint16_t>(attitude.yaw * 100.0f) // yaw (cdeg 단위로 변환)
-                    );
-                    send_mavlink_msg(&msg);
-            }
-            break;
-        }
-        case 1: case 8:{
-            //if (m_gps.home_alt > -9000.0f && m_gps.fixType >= 3) {
-                //현재고도
-                int32_t alt_msl = static_cast<int32_t>(m_gps.horMSL );
-                
-                // 상대 고도 (Relative) mm 단위
-                int32_t alt_rel = static_cast<int32_t>((m_gps.horMSL - m_gps.home_alt) );
-                
-                mavlink_msg_global_position_int_pack(
-                    ConfigMavlink::sys_id ,ConfigMavlink::comp_id , &msg, esp_timer_get_time()/1000,
-                    static_cast<int32_t>(m_gps.lat * 1e7), 
-                    static_cast<int32_t>(m_gps.lon * 1e7),
-                    static_cast<int32_t>(alt_msl),      // 해수면 고도
-//                    static_cast<int32_t>(ENV::g_altitude.current),      // 이것은 기압계로 측정한 고도 => g_baro.filtered_altitude * 1000.0f),
-                    static_cast<int32_t>(alt_rel),      // 이것은 기압계로 측정한 고도 => g_baro.filtered_altitude * 1000.0f),
-                    static_cast<int16_t>(m_gps.velNorth),   // 단위(cm/s) gps에서 데이터를 받아 처리 VGT문장에서 받으면 된다.
-                    static_cast<int16_t>(m_gps.velEast),
-                    static_cast<int16_t>(m_gps.velDown),
-                    static_cast<int16_t>(attitude.yaw * 100.0f)
-                );
 
+        case 9: { // 5. 원시 GPS 상태 위성 뷰 데이터 전송
+            // [오류 수정] 이미 나누어진 m_gps.pDOP 데이터에 다시 100을 곱하여 MAVLink 규격(배율 정수형) 원복 [Anc19]
+            uint16_t mav_dop = static_cast<uint16_t>(m_gps.pDOP * 100.0f); 
+
+            mavlink_msg_gps_raw_int_pack(
+                    ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, 
+                    esp_timer_get_time() / 1000,               
+                    m_gps.fixType,                                                   
+                    static_cast<int32_t>(m_gps.lat * 1e7),      
+                    static_cast<int32_t>(m_gps.lon * 1e7),      
+                    static_cast<int32_t>(m_gps.horMSL), 
+                    mav_dop,                                  // HDOP 매칭 교정
+                    mav_dop,                                  // VDOP 매칭 교정
+                    static_cast<uint16_t>(m_gps.gndSpeed),        
+                    static_cast<uint16_t>(m_gps.headMotion),       
+                    static_cast<uint8_t>(m_gps.numSat),           
+                    static_cast<int32_t>(m_gps.height),         
+                    m_gps.horAcc,                                 
+                    m_gps.verAcc,                                 
+                    m_gps.speedAcc,                                 
+                    0,                                          
+                    static_cast<uint16_t>(m_att.yaw * 100.0f) // uint16_t 규격 바인딩 [Anc18]
+                );
                 send_mavlink_msg(&msg);
-            //}
             break;
         }
-        case 2:
-        case 4:
-        case 5:
-        case 7:
+        
+        default:
             break;
     }
-    // 0 -> 1 -> 2 순환
-    step = (step + 1) % 10;  // 100ms단위로 실행함. 1초를 10개로 나뉘어서 처리.
+
+    // 다음 루프를 위해 스텝 시퀀스 인크리먼트 (0 ~ 9 순환)
+    if (++step >= 10) {
+        step = 0;
+    }
 }
 
 esp_err_t Mavlink::initialize()
