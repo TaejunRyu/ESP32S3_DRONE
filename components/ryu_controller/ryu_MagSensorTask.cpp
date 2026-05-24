@@ -46,17 +46,27 @@ void MagSensorTask::ReadMagSensorTask(void* pvParameters) {
     //ist8310.calibrate_hard_iron();
 
     Vector3f mag_buf {}; 
-
+    size_t communication_fail_count =0;
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(10); 
     while (true) {
         if (ist8310.is_data_ready()) {
+            communication_fail_count = 0; // 통신 성공 시 무조건 최상단에서 실패 카운트 리셋!
             esp_err_t err = ist8310.updateSample(mag_buf); 
             if (err == ESP_OK) {
                 ist8310.align_NED(mag_buf);
                 //ESP_LOGW(TAG,"| mx: %8.3f | my: %8.3f | mz: %8.3f |", mag_buf.x , mag_buf.y , mag_buf.z );
                 SharedDataManager::getInstance().publish_data<Data_type::DT_MAG_DATA>(mag_buf);
                 SharedDataManager::getInstance().set_mag_updated(true);
+            }else{
+                communication_fail_count++;
+                ESP_LOGW(TAG, "센서 통신 일시 실패 (%d회 연속)", communication_fail_count);
+
+                // [Fail-Safe 방어 대책] 10ms 연속 먹통 시 즉각적인 비상 대책 수립
+                if (communication_fail_count >= 10) {
+                    ESP_LOGE(TAG, "치명적 오류: Baro 연결 유실! 긴급 비상 모드 진입 필요.");
+                    // task->_data_manager->trigger_emergency_stop();
+                }
             }
         }
         vTaskDelayUntil(&xLastWakeTime, xFrequency);

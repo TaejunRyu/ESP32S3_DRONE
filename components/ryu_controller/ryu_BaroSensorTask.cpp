@@ -48,6 +48,9 @@ void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
     float pressure{};       // 현재 기압.
     BaroData baro_buf {};
 
+
+    size_t communication_fail_count = 0;
+
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(40); 
 
@@ -55,10 +58,11 @@ void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
         if (bmp388.is_data_ready()){
             esp_err_t err = bmp388.get_pressure(&pressure);
             if(err == ESP_OK){
-                if (pressure < 900){
-                    pressure = previousPressure;
-                }
-                previousPressure = pressure;
+                communication_fail_count = 0; // 통신 성공 시 무조건 최상단에서 실패 카운트 리셋!
+                // if (pressure < 900){
+                //     pressure = previousPressure;
+                // }
+                // previousPressure = pressure;
 
                 // 1. 시동 시 현재 위치의 기압 수집 (평균 산출)
                 if (!cal_gndPressure){
@@ -97,6 +101,15 @@ void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
                 
                 SharedDataManager::getInstance().publish_data<Data_type::DT_BARO_DATA>(baro_buf);
                 SharedDataManager::getInstance().set_baro_updated(true);
+            }else{
+                communication_fail_count++;
+                ESP_LOGW(TAG, "센서 통신 일시 실패 (%d회 연속)", communication_fail_count);
+
+                // [Fail-Safe 방어 대책] 10ms 연속 먹통 시 즉각적인 비상 대책 수립
+                if (communication_fail_count >= 10) {
+                    ESP_LOGE(TAG, "치명적 오류: Baro 연결 유실! 긴급 비상 모드 진입 필요.");
+                    // task->_data_manager->trigger_emergency_stop();
+                }
             }
         }
         vTaskDelayUntil(&xLastWakeTime, xFrequency);

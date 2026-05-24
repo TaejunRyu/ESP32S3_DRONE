@@ -55,8 +55,8 @@ void ImuSensorTask::readImuSensorTask(void* pvParameters) {
     ImuSensorTask* task = static_cast<ImuSensorTask*>(pvParameters);
     auto& icm20948 = Sensor::ICM20948::getInstance();
   
-    int communication_fail_count = 0; 
-    int cal_sample_count = 0;
+    size_t  communication_fail_count = 0; 
+    uint16_t cal_sample_count = 0;
     
     esp_err_t err = ESP_OK;
     // 1kHz 주기 제어 설정 (1ms)
