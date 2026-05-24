@@ -30,7 +30,8 @@ public:
     float getXErr(){return x_err;};
     float getYErr(){return y_err;};
     float getZErr(){return z_err;};
-
+    
+    void getQuaternion(float out_q[4]) const;
 private:
     KalmanFilter();
     ~KalmanFilter() = default;
@@ -42,8 +43,6 @@ private:
     float q[4];
     float P[4][4];
 
-
-    //SensorData  _imudata{};
 
     // 100% 정상 작동하는 올바른 참조 방식입니다. (대문자 P 적용)
     // 쉽게 보는 법: 기체가 정지해 있을 때 P[1][1], P[2][2], P[3][3]의 값이 너무 커지지 않고 작은 값(예: 0.01 이하)으로 안정적으로 유지되고 있다면, 
@@ -83,6 +82,8 @@ private:
 
     // [수정] 2차원 배열 참조 형식으로 명확히 타입 정의하여 컴파일 에러 차단
     void matrixInversion3x3(const float in[3][3], float out[3][3]);
+
+    
 };
 
 } // namespace Filter

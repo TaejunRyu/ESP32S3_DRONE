@@ -8,6 +8,7 @@
 #include "ryu_Config.hpp"
 #include "ryu_SharedDataManager.hpp"
 #include "ryu_KalmanFilter.hpp"
+#include "ryu_VerticalFilter.hpp"
 #include "ryu_ImuSensorTask.hpp"
 #include "ryu_MagSensorTask.hpp"
 #include "ryu_BaroSensorTask.hpp"
@@ -22,6 +23,13 @@ namespace Controller {
 
 esp_err_t Flight::initialize(){
     esp_err_t err = ESP_OK;
+    
+    if(!Service::EspNow::get_instance().is_initialized()){
+        Service::EspNow::get_instance().initialize();
+        Service::EspNow::get_instance().StartTask();
+        Service::EspNow::get_instance().connect_callback();
+    }
+
     if (!Driver::Battery::get_instance().is_initialized()){
         err = Driver::Battery::get_instance().initialize();
     }
@@ -37,16 +45,11 @@ esp_err_t Flight::initialize(){
         Sensor::Gps::getInstance().StartTask();
     }
 
-    if(!ImuSensorTask::getInstance().is_initialized()){
-        err = ImuSensorTask::getInstance().initialize();
-        ImuSensorTask::getInstance().StartTask();
-    }
-
+   
     if(!MagSensorTask::getInstance().is_initialized()){
         MagSensorTask::getInstance().initialize();
         MagSensorTask::getInstance().StartTask();
     }
-
 
 
     if(!BaroSensorTask::getInstance().is_initialized()){
@@ -54,10 +57,10 @@ esp_err_t Flight::initialize(){
         BaroSensorTask::getInstance().StartTask();
     }
 
-    if(!Service::EspNow::get_instance().is_initialized()){
-        Service::EspNow::get_instance().initialize();
-        Service::EspNow::get_instance().StartTask();
-        Service::EspNow::get_instance().connect_callback();
+
+    if(!ImuSensorTask::getInstance().is_initialized()){
+        err = ImuSensorTask::getInstance().initialize();
+        ImuSensorTask::getInstance().StartTask();
     }
 
     if(!Service::Timer::get_instance().is_initialized()){
@@ -88,10 +91,31 @@ void Flight::flight_task(void *pvParameters)
     // 2. 칼만 필터 코어 초기화 (NED 기준)
     auto& kalman = Filter::KalmanFilter::getInstance();
     kalman.init(0.0f, 0.0f, 0.0f);
-
+    
+    auto& v_kalman = Filter::VerticalFilter::getInstance();
 
     auto& pid = PidControl::getInstance();
 
+
+    // 2. [자세 게인 튜닝 파라미터 주입] 구조: {Kp, Ki, Kd, I_Limit, Out_Limit}
+    Controller::PidParams att_angle = {2.5f, 0.0f, 0.0f, 0.0f, 10.0f};  // 바깥 각도 루프
+    Controller::PidParams att_rate  = {0.08f, 0.02f, 0.001f, 0.5f, 40.0f}; // 안쪽 각속도 루프
+    pid.setAngleParams(att_angle, att_angle, att_angle);
+    pid.setRateParams(att_rate, att_rate, att_rate);
+
+
+    // 3. [고도 게인 튜닝 파라미터 독립 주입]
+    Controller::AltitudeParams alt_config;
+    alt_config.kp_alt         = 1.2f;   // 고도 -> 속도 변환율
+    alt_config.kp_vel         = 1.8f;   // 속도 P
+    alt_config.ki_vel         = 0.4f;   // 속도 I
+    alt_config.kd_vel         = 0.01f;  // 속도 D
+    alt_config.vel_limit      = 2.0f;   // 최대 2m/s
+    alt_config.hover_throttle = 43.5f;  // 이 기체의 공중 유지 호버링 스로틀 추정치 43.5%
+    alt_config.out_limit      = 85.0f;  // 최대 출력 한계 제한
+    pid.setAltitudeParams(alt_config);
+
+  
     // 2. PID 파라미터 초기화 (구동 대상 하드웨어에 맞는 튜닝 파라미터 입력 필요)
     // 값 형식: {Kp, Ki, Kd, I_Limit, Output_Limit}
     Controller::PidParams angle_gain = {2.0f, 0.1f, 0.05f, 0.5f, 10.0f}; // 바깥 루프 (목표 각속도 rad/s 한계)
@@ -162,7 +186,6 @@ void Flight::flight_task(void *pvParameters)
                 }
             }
                         
-
             // 3. 자북 방위각에 '단 한 번만' 편각을 더하여 진북 방위각 생성 (누적 방지)
             curAttitude.yaw = curAttitude.yaw - target_true_north;
 
@@ -170,38 +193,134 @@ void Flight::flight_task(void *pvParameters)
             while (curAttitude.yaw > M_PI)  curAttitude.yaw -= 2.0f * M_PI;
             while (curAttitude.yaw < -M_PI) curAttitude.yaw += 2.0f * M_PI;
 
-            // 자세 데이터(RADIAN)...(대략 10hz 정도의 refresh할 데이터를 보냄.)
-            static uint16_t qgc_publish_count =0;
-            if (++qgc_publish_count >= 100) { 
-                qgc_publish_count = 0;
-                QgcAttitude_t qgcAtt;
-                qgcAtt.att      = curAttitude;
-                qgcAtt.speed    = cur_imu_data.gyro * DEG_TO_RAD;
-                sharedData.publish_data<Data_type::DT_QGC_ATTITUDE >(qgcAtt);
-            }
 
+            float q_buffer[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+            
+            // 1. [핵심] 기존 자세 EKF로부터 실시간 최신 쿼터니언 상태 변수 취득
+            // (이 값이 실시간 기체의 롤, 피치 기울임 정보를 온전히 담고 있습니다.)
+            kalman.getQuaternion(q_buffer);
+            float q0 = q_buffer[0]; 
+            float q1 = q_buffer[1]; 
+            float q2 = q_buffer[2]; 
+            float q3 = q_buffer[3];
+
+
+            Vector3f acc;
+            // 💡 센서 원시 데이터(m/s^2)를 9.81로 나누어 단위를 G 규격(정지 시 1.0)으로 가공
+            acc.x = cur_imu_data.acc.x / 9.80665f;
+            acc.y = cur_imu_data.acc.y / 9.80665f;
+            acc.z = cur_imu_data.acc.z / 9.80665f;
+
+            // 3. 취득한 기존 EKF 쿼터니언을 이용하여 체프 가속도를 지구 수직 방향(Z축 Down)으로 회전 투영
+            float acc_z_earth = 2.0f * (q1*q3 - q0*q2) * acc.x + 
+                                2.0f * (q0*q1 + q2*q3) * acc.y + 
+                                (q0*q0 - q1*q1 - q2*q2 + q3*q3) * acc.z;
+
+            // 4. 중력 성분(1.0G 또는 9.81m/s^2)을 차감하여 순수 운동 상승/하강 가속도만 분리
+            // (가만히 수평 호버링 중일 때는 이 값이 정확히 0.0f 에 가깝게 홀딩되어야 성공입니다.)
+            float pure_vertical_accel = acc_z_earth - 1.0f; ; // 가속도 단위 규격이 G(Gravity)인 경우
+
+            // 5. 1ms 주기로 수직 칼만필터 시간 예측 단계 실행
+            v_kalman.predict(pure_vertical_accel, dt);            
+
+            //[목표 고도] ➔ Outer Loop (고도 P 제어) ➔ [목표 상승/하강 속도] ➔ Inner Loop (속도 PID) ➔ [최종 Throttle]
             BaroData baroData{};
             if(sharedData.is_baro_updated()){ //40ms단위로 데이터가 들어온다.
                 baroData =  sharedData.get_shared_data<Data_type::DT_BARO_DATA>();
-                // ESP_LOGI(TAG, "|R: %8.5f |P: %8.5f |Y: %8.5f| gnd_pressure : %8.5f | pressure: %8.5f | alt:%8.5f | climb_rate: %8.5F", 
-                //         curAttitude.roll,        curAttitude.pitch,       curAttitude.yaw,
-                //         baroData.gnd_pressure ,baroData.pressure, baroData.altitude,baroData.climb_rate
-                //         );
+                v_kalman.update(baroData.altitude); // 40ms 주기 보정
+                ESP_LOGI(TAG, "Baro -> gnd_pressure: %5.2f, pressure: %5.2f, altitude: %5.2f", 
+                            baroData.gnd_pressure ,baroData.pressure,baroData.altitude);
             }
+
+            // gps의 고도와 융합.
+            if(sharedData.is_gps_updated()){ 
+                gps_data_t gpsData = sharedData.get_shared_data<Data_type::DT_GPS_DATA>();                
+                // 위성이 최소 3D Fix(3 이상) 이상 잡히고 정밀도가 신뢰할 만할 때만 필터 보정에 주입
+                if (gpsData.fixType >= 3 && gpsData.verAcc < 4000) {
+                    // gpsData.horMSL(해수면 고도) 또는 지면 기준 고도 변수 매핑
+                    v_kalman.updateGPS(gpsData.horMSL); 
+                }
+            }
+
+            // 7. 정제된 1000Hz 고도/속도로 고도 PID 연산 제어 처리...
+            float current_alt = v_kalman.getAltitude();
+            float current_vel = v_kalman.getVelocity();
+
+            // if (++loop_cnt >= 20) { 
+            //     loop_cnt = 0;
+            //     ESP_LOGI(TAG, "Altitude -> est_alt: %5.2f, est_vel: %5.2f", current_alt,current_vel);
+            // }
 
             // 자이로 데이터는 진동이 발생할경우( 필터 제공 )
             static Vector3f filtered_rate = {0.0f, 0.0f, 0.0f};
             const float alpha = 0.3f; 
-            filtered_rate.x = alpha * cur_imu_data.gyro.x + (1.0f - alpha) * filtered_rate.x;
-            filtered_rate.y = alpha * cur_imu_data.gyro.y + (1.0f - alpha) * filtered_rate.y;
-            filtered_rate.z = alpha * cur_imu_data.gyro.z + (1.0f - alpha) * filtered_rate.z;
- 
-            // 3. 캐스케이드 PID 연산 수행
-            Vector3f motor_outputs = pid.updateCascade(target_pose, curAttitude, filtered_rate, dt);
+            filtered_rate.x = alpha * cur_imu_data.gyro.x * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.x;
+            filtered_rate.y = alpha * cur_imu_data.gyro.y * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.y;
+            filtered_rate.z = alpha * cur_imu_data.gyro.z * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.z;
 
-            // 4. 모터/서보 제어기에 출력값 전달 분배 처리
+            // -------------------------------------------------------------
+            // 핵심 연산: 자세와 고도 제어 명령을 병렬 독립 연산 처리
+            // -------------------------------------------------------------
+            float target_altitude  = 1.5f;               // 1.5m 고도 홀딩 명령
+            Vector3f att_outputs = pid.updateCascade(target_pose, curAttitude, filtered_rate, dt);
+            float base_throttle  = pid.updateAltitudeCascade(target_altitude, current_alt, current_vel, dt);
+            
+            // -------------------------------------------------------------
+            // 최종 믹싱 단계: 고도 스로틀(Base)에 자세 복원력을 축별 가감산 (Quadcopter X-Type / NED 기준)
+            // -------------------------------------------------------------
+            float m1_fr = base_throttle - att_outputs.x - att_outputs.y - att_outputs.z; // 전방 우측
+            float m2_bl = base_throttle + att_outputs.x + att_outputs.y - att_outputs.z; // 후방 좌측
+            float m3_fl = base_throttle + att_outputs.x - att_outputs.y + att_outputs.z; // 전방 좌측
+            float m4_br = base_throttle - att_outputs.x + att_outputs.y + att_outputs.z; // 후방 우측
+
+            
+            // [선택지 2] 만약 일반 표준 PWM 변속기(ESC)를 사용하시는 경우 (출력 범위: 1000us ~ 2000us)
+            uint32_t pwm_m1 = (uint32_t)(1000.0f + (m1_fr / 100.0f) * 1000.0f);
+            uint32_t pwm_m2 = (uint32_t)(1000.0f + (m2_bl / 100.0f) * 1000.0f);
+            uint32_t pwm_m3 = (uint32_t)(1000.0f + (m3_fl / 100.0f) * 1000.0f);
+            uint32_t pwm_m4 = (uint32_t)(1000.0f + (m4_br / 100.0f) * 1000.0f);
 
 
+            // 안전 가이드 한계값 구속 (1000us 미만이나 2000us 초과 방어)
+            if (pwm_m1 > 2000) pwm_m1 = 2000; 
+            if (pwm_m1 < 1000) pwm_m1 = 1000;
+            if (pwm_m2 > 2000) pwm_m2 = 2000; 
+            if (pwm_m2 < 1000) pwm_m2 = 1000;
+            if (pwm_m3 > 2000) pwm_m3 = 2000; 
+            if (pwm_m3 < 1000) pwm_m3 = 1000;
+            if (pwm_m4 > 2000) pwm_m4 = 2000; 
+            if (pwm_m4 < 1000) pwm_m4 = 1000;
+
+
+            // 실제 ESP32-S3 MCPWM 이나 LEDC 드라이버 채널에 고속 펄스 폭 업데이트
+            // mcpwm_set_duty_in_us(..., pwm_m1);
+
+
+
+            // -------------------------------------------------------------
+            // [확장 마감] 자세 및 수직 상태 데이터 QGC 게시 연동 (10Hz)
+            // -------------------------------------------------------------
+            static uint16_t qgc_publish_count = 0;
+            if (++qgc_publish_count >= 100) { 
+                qgc_publish_count = 0;
+                
+                QgcAttitude_t qgcAtt;
+                qgcAtt.att      = curAttitude;                  // 진북 보정 완료된 오일러각
+                qgcAtt.speed    = cur_imu_data.gyro * DEG_TO_RAD; // 각속도 라디안
+                
+                // 💡 수직 칼만 필터가 계산한 정밀 고도와 속도를 10Hz 시퀀스에 결합합니다.
+                qgcAtt.base_throttle = base_throttle;
+                qgcAtt.alt      = current_alt; 
+                qgcAtt.v_speed  = current_vel; 
+
+                // 공유 메모리 매니저에 안전하게 배포 (락프리 더블 버퍼링 작동)
+                sharedData.publish_data<Data_type::DT_QGC_ATTITUDE>(qgcAtt);
+            }
+
+
+
+
+            
             // NED 좌표 출력축 계산 결과 로그 출력
             // if (++loop_cnt >= 20) { 
             //     loop_cnt = 0;
@@ -244,5 +363,21 @@ esp_err_t  Flight::StartTask()
     }
     return ESP_OK;
 }
+
+Vector3f Flight::rotateMagVector(const Vector3f& raw_mag, float rot_rad) {
+    Vector3f corrected_mag{0.0f, 0.0f, 0.0f};
+
+    float cos_ang = std::cos(rot_rad);
+    float sin_ang = std::sin(rot_rad);
+
+    corrected_mag.x = raw_mag.x * cos_ang - raw_mag.y * sin_ang;
+    corrected_mag.y = raw_mag.x * sin_ang + raw_mag.y * cos_ang;
+    corrected_mag.z = raw_mag.z; // Z축 성분(수직 자기장 분력)은 회전에 무관하므로 그대로 보존
+
+    return corrected_mag;
+}
+
+
+
 
 } // namespace Controller

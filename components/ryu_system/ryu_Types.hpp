@@ -185,6 +185,9 @@ struct Attitude_t {
 struct QgcAttitude_t{
     Attitude_t att;
     Vector3f   speed;
+    float      alt;       // 💡 [추가] 수직 칼만 필터 추정 고도 (m)
+    float      v_speed;   // 💡 [추가] 수직 칼만 필터 추정 수직 속도 (m/s)
+    float base_throttle;
 };
 
 
@@ -211,7 +214,7 @@ struct BaroData {
     float pressure;    // 기압 (hPa)
     float altitude;    // 계산된 상대 고도 (m)
     //float temperature;
-    float climb_rate;
+    //float climb_rate;
 };
 
         // --- GPS 사용자 데이터 ---

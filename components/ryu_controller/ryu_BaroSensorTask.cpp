@@ -38,23 +38,18 @@ void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
     float sumPressure{0};
     uint16_t sumCount{0};
     float currentAlt{};
-    float currentFilteredAlt{}, lastFilteredAlt{};
-    float climbRate{};
+    float currentFilteredAlt{};
+    float lastFilteredAlt{};  // 확정된 고도.
     float altOffset{};       
     bool isFirstAltCalculated = false; 
 
     float previousPressure{};
-    float gnd_pressure{};
-    float pressure{};
+    float gnd_pressure{};   // 날리기전 지면의 기압.
+    float pressure{};       // 현재 기압.
     BaroData baro_buf {};
 
-    // 최종 융합 고도 상태 보존용 전역형 변수 초기화
-    float gpsFusedAlt = 0.0f; 
-    float gps_base_altitude = 0.0f;
-    bool is_gps_home_set = false;
-
     TickType_t xLastWakeTime = xTaskGetTickCount();
-    const TickType_t xFrequency = pdMS_TO_TICKS(20); // 50Hz
+    const TickType_t xFrequency = pdMS_TO_TICKS(40); 
 
     while (true) {
         if (bmp388.is_data_ready()){
@@ -81,65 +76,23 @@ void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
                     currentAlt = 44330.0f * (1.0f - powf(pressure / gnd_pressure, 0.190295f));
                     float currentFiltered = (currentAlt * 0.2f) + (lastFilteredAlt * 0.8f);
                     
-                    if (!isFirstAltCalculated) {
+                    if (!isFirstAltCalculated) { // gnd_pressue으로 고도를 계산한것이 offet이되어짐.
                         altOffset = currentFiltered;
                         isFirstAltCalculated = true;
-                    }
-                    
+                    }                 
                     // 오프셋이 반영된 완전무결한 순수 상대 고도 확정
                     currentFilteredAlt = currentFiltered - altOffset;
-                    
-                    // 속도 변화율 연산 (dt = 0.020s)
-                    float raw_rate = (currentFilteredAlt - lastFilteredAlt) / 0.020f; 
-                    
-                    // 승강률 끈적한 로우패스 필터
-                    climbRate = (climbRate * 0.95f) + (raw_rate * 0.05f);
-                    
                     // 1차적으로 기압계 기반 고도 동기화
                     lastFilteredAlt = currentFilteredAlt;                    
                 } else {
                     currentFilteredAlt = 0.0f;
-                    climbRate = 0.0f;
                     lastFilteredAlt = 0.0f;
                 }
                 
-                // 🛠️ [버그 정정 1] GPS가 안 도는 루프에서도 이전 융합 누적본이 
-                // 안전하게 기본값으로 복사되도록 순서를 완벽하게 격리 방어합니다.
-                gpsFusedAlt = currentFilteredAlt;
-
-                // 3. GPS 데이터 이벤트 수신 및 상보 필터 융합
-                // gps_data_t mGps{};
-                // if(SharedDataManager::getInstance().is_gps_updated()){
-                //     mGps = SharedDataManager::getInstance().get_shared_data<Data_type::DT_GPS_DATA>();
-                    
-                //     if (mGps.fixType >= 3) { // 3D Fix 이상 신뢰 수준 확보 시
-                        
-                //         if (!is_gps_home_set && cal_gndPressure) {
-                //             gps_base_altitude = mGps.horMSL; 
-                //             is_gps_home_set = true;
-                //         }
-                        
-                //         if (is_gps_home_set) {
-                //             // GPS 기준 상대 고도 추출
-                //             float gpsRelativeAlt = mGps.horMSL - gps_base_altitude;
-
-                //             // 장기 날씨 드리프트 감쇄용 99.8% : 0.2% 상보 필터 가동
-                //             gpsFusedAlt = (currentFilteredAlt * 0.998f) + (gpsRelativeAlt * 0.002f);
-                            
-                //             // 🛠️ [버그 정정 2] 물리 파이프라인 대통합 동기화
-                //             // GPS 융합 결과를 기압계 고도 제어선들에도 똑같이 피딩해주어야 
-                //             // 다음 루프 승강률(raw_rate) 계산 시 고도가 뚝뚝 끊기며 수직 점프하는 현상이 원천 차단됩니다.
-                //             currentFilteredAlt = gpsFusedAlt;
-                //             lastFilteredAlt = gpsFusedAlt; 
-                //         }
-                //     }
-                // }
-
                 // 4. 최종 정렬된 데이터를 갱신 발행
-                baro_buf.climb_rate     = climbRate;
                 baro_buf.gnd_pressure   = gnd_pressure;
                 baro_buf.pressure       = pressure;
-                baro_buf.altitude       = gpsFusedAlt; // 제어 루프에 공급되는 완벽한 융합 고도
+                baro_buf.altitude       = currentFilteredAlt; // 제어 루프에 공급되는 완벽한 융합 고도
                 baro_buf.timestamp      = esp_timer_get_time();
                 
                 SharedDataManager::getInstance().publish_data<Data_type::DT_BARO_DATA>(baro_buf);

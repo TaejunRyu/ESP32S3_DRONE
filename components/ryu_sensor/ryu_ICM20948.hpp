@@ -88,12 +88,13 @@ class ICM20948 : public ISensor{
         static inline constexpr uint8_t B0_EXT_SLV_SENS_DATA_00 = 0x3B; // SPI 모드에서 지자계 데이터가 들어오는 시작점
 
 
-        static inline constexpr float MAG_SCALE_X        = 1.0145;
-        static inline constexpr float MAG_SCALE_Y        = 0.9987;
-        static inline constexpr float MAG_SCALE_Z        = 0.9872;
+        static inline constexpr float MAG_SCALE_X    = 1.0138;
+        static inline constexpr float MAG_SCALE_Y    = 0.9964;
+        static inline constexpr float MAG_SCALE_Z    = 0.9902;
         static inline constexpr float MAG_OFFSET_X   = -2.6250;
-        static inline constexpr float MAG_OFFSET_Y   = 15.8250;
-        static inline constexpr float MAG_OFFSET_Z   = 30.9750;
+        static inline constexpr float MAG_OFFSET_Y   = 11.5500;
+        static inline constexpr float MAG_OFFSET_Z   = 30.6000;
+
 
         // 센서 원시 데이터(LSB)를 (g)(중력가속도 단위, 약 9.81 m/s^2)로 변환하는 스케일 팩터입니다.
         // 16bit ADC 절반 크기인 32768/8g = 4096LSB/g

@@ -643,16 +643,14 @@ void Mavlink::StartTask()
 
 void Mavlink::on_timer_tick()
 {
-    // 타이머 틱 카운터 변수 (0 ~ 9 루프)
     static uint8_t step = 0;
     mavlink_message_t msg;
 
-    // --- [최적화] 모든 데이터의 시간 동기화를 위해 진입 시점에 일괄 전송 데이터 캡처 ---
-    QgcAttitude_t m_att     = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_QGC_ATTITUDE>();
-    gps_data_t m_gps     = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_GPS_DATA>();    
-    BaroData   m_alt     = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_BARO_DATA>();
+    // --- 일괄 전송 데이터 안전 패칭 (10Hz 동기화 캡처) ---
+    QgcAttitude_t m_att = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_QGC_ATTITUDE>();
+    gps_data_t    m_gps = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_GPS_DATA>();    
 
-    // 10Hz 타이머 매 틱마다 자세(Attitude) 데이터는 상시 전송 (최우선순위 가시성 확보)
+    // 10Hz 타이머 매 틱마다 자세(Attitude) 데이터 상시 전송 (라디안 단위 정방향 송신)
     mavlink_msg_attitude_pack(ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, esp_timer_get_time()/1000, 
                                 m_att.att.roll, 
                                 m_att.att.pitch, 
@@ -663,12 +661,17 @@ void Mavlink::on_timer_tick()
                             );
     send_mavlink_msg(&msg);
 
+    // 💡 [유틸리티] MAVLink 0~360도 양수 방위각 및 centi-degrees 연산 가공
+    float yaw_deg = m_att.att.yaw * (180.0f / M_PI);
+    if (yaw_deg < 0.0f) yaw_deg += 360.0f; // 음수 각도 보정 line
+    uint16_t heading_centi_deg = (uint16_t)(yaw_deg * 100.0f); // 0 ~ 36000 범위 정수
+
     // 스케줄러 분기 루프 시작
     switch (step) {
         case 0: { // 1. 하트비트 전송
             mavlink_msg_heartbeat_pack(ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, 
                                         MAV_TYPE_QUADROTOR, 
-                                        MAV_AUTOPILOT_PX4, // PX4 아키텍처 에뮬레이트 호환성 극대화
+                                        MAV_AUTOPILOT_PX4, 
                                         _heartbeat.base_mode,  
                                         _heartbeat.custom_mode, 
                                         3);
@@ -676,39 +679,57 @@ void Mavlink::on_timer_tick()
             break;
         }
 
-        case 1:
-        case 8: { // 2. 글로벌 위치 정보 전송 (잘린 코드 완벽 복구)
+        case 1: { // 2. VFR_HUD 전송 (QGC 계기판 고도/속도 연동 마감)
+            // 💡 GPS 속도가 cm/s 또는 mm/s 단위인 경우 m/s로 정정 나눗셈 스케일링 필요 (여기서는 원본 유지)
+            float qgc_gnd_speed = m_gps.gndSpeed; 
+
+            mavlink_msg_vfr_hud_pack(
+                ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg,          
+                0.0f,                                     // airspeed (멀티콥터 미사용)
+                qgc_gnd_speed,                            // groundspeed (m/s 단위)
+                (int16_t)yaw_deg,                         // 💡 수정한 도(Degree) 단위 정수 방위각 (0~360)
+                (uint16_t)m_att.base_throttle,            // 고도 PID 베이스 스로틀 (%)
+                m_att.alt,                                // 💡 정밀 수직 칼만필터 추정 고도 (float m)
+                m_att.v_speed                             // 💡 정밀 수직 칼만필터 추정 상승속도 (float m/s)
+            );
+            send_mavlink_msg(&msg);
+            break;
+        }
+
+        case 8: { // 3. 글로벌 위치 정보 전송 (QGC 지도 마커 부드러운 연동 마감)
             int32_t send_lat = 0;
             int32_t send_lon = 0;
             int32_t send_alt_msl = 0;
 
-            // 창가/실내 유령 좌표 널뛰기 현상 방지 가드링 설정
             if (m_gps.fixType >= 3 && m_gps.horAcc < 4000) { 
-                send_lat = static_cast<int32_t>(m_gps.lat * 1e7);
-                send_lon = static_cast<int32_t>(m_gps.lon * 1e7);
-                send_alt_msl = static_cast<int32_t>(m_gps.horMSL); 
+                send_lat = static_cast<int32_t>(m_gps.lat);
+                send_lon = static_cast<int32_t>(m_gps.lon);
+                send_alt_msl = static_cast<int32_t>(m_gps.horMSL); // 이미 GPS 내부가 mm 규격이면 그대로 주입
             }
 
-            int32_t baro_alt_mm = static_cast<int32_t>(m_alt.altitude * 1000.0f); 
+            // 💡 수직 칼만필터가 뱉은 m 단위 고도를 MAVLink 규격인 mm 단위 int32_t로 변환
+            int32_t relative_alt_mm = static_cast<int32_t>(m_att.alt * 1000.0f);
 
-            // 규격에 맞춰 누락되었던 마지막 3개 인자(velEast, velDown, hdg) 및 패킹 완성
+            // 💡 수직 속도(velDown) 역시 NED 링크 상 수직 하강이 + 이므로, 상승(+) 속도 변수에 -1을 곱해 매핑
+            int16_t vel_down_cm_s = static_cast<int16_t>(-m_att.v_speed * 100.0f);
+
             mavlink_msg_global_position_int_pack(
                 ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, 
                 esp_timer_get_time() / 1000,    
                 send_lat,                       
                 send_lon,                       
                 send_alt_msl,                   
-                baro_alt_mm,                    
+                relative_alt_mm,                // 💡 mm 단위 정수로 교정 완료
                 static_cast<int16_t>(m_gps.velNorth), 
-                static_cast<int16_t>(m_gps.velEast),  // 누락 복구
-                static_cast<int16_t>(m_gps.velDown),  // 누락 복구
-                static_cast<uint16_t>(m_att.att.yaw  * 100.0f) // 누락 복구 및 uint16_t 규격 매칭
+                static_cast<int16_t>(m_gps.velEast),  
+                vel_down_cm_s,                  // 💡 우리가 구한 정밀 수직 속도(cm/s)로 완벽 융합
+                heading_centi_deg               // 💡 0~36000 범위의 centi-degrees 규격으로 교정 완료
             );
             send_mavlink_msg(&msg);
             break;
         }
 
-        case 3: { // 3. 시스템 상태 전송 (배터리 및 CPU 부하)
+        case 3: { // 4. 시스템 상태 전송
             uint32_t sensors_present = MAV_SYS_STATUS_SENSOR_3D_ACCEL | MAV_SYS_STATUS_SENSOR_3D_ACCEL2 | 
                                        MAV_SYS_STATUS_SENSOR_3D_GYRO  | MAV_SYS_STATUS_SENSOR_3D_GYRO2  |
                                        MAV_SYS_STATUS_SENSOR_3D_MAG   | MAV_SYS_STATUS_SENSOR_3D_MAG2   | 
@@ -735,7 +756,7 @@ void Mavlink::on_timer_tick()
             break;
         }    
 
-        case 6: { // 4. 라디오 전파 링크 상태 전송
+        case 6: { // 5. 라디오 전파 링크 상태 전송
              mavlink_msg_radio_status_pack_chan(
                             ConfigMavlink::sys_id, ConfigMavlink::comp_id, MAVLINK_COMM_1, &msg, 
                             Service::EspNow::get_instance().current_rssi, 
@@ -744,19 +765,18 @@ void Mavlink::on_timer_tick()
             break;
         }
 
-        case 9: { // 5. 원시 GPS 상태 위성 뷰 데이터 전송
-            // [오류 수정] 이미 나누어진 m_gps.pDOP 데이터에 다시 100을 곱하여 MAVLink 규격(배율 정수형) 원복 [Anc19]
+        case 9: { // 6. 원시 GPS 상태 위성 뷰 데이터 전송
             uint16_t mav_dop = static_cast<uint16_t>(m_gps.pDOP * 100.0f); 
 
             mavlink_msg_gps_raw_int_pack(
                     ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, 
                     esp_timer_get_time() / 1000,               
                     m_gps.fixType,                                                   
-                    static_cast<int32_t>(m_gps.lat * 1e7),      
-                    static_cast<int32_t>(m_gps.lon * 1e7),      
+                    static_cast<int32_t>(m_gps.lat),      
+                    static_cast<int32_t>(m_gps.lon),      
                     static_cast<int32_t>(m_gps.horMSL), 
-                    mav_dop,                                  // HDOP 매칭 교정
-                    mav_dop,                                  // VDOP 매칭 교정
+                    mav_dop,                                  
+                    mav_dop,                                  
                     static_cast<uint16_t>(m_gps.gndSpeed),        
                     static_cast<uint16_t>(m_gps.headMotion),       
                     static_cast<uint8_t>(m_gps.numSat),           
@@ -765,7 +785,7 @@ void Mavlink::on_timer_tick()
                     m_gps.verAcc,                                 
                     m_gps.speedAcc,                                 
                     0,                                          
-                    static_cast<uint16_t>(m_att.att.yaw * 100.0f) // uint16_t 규격 바인딩 [Anc18]
+                    heading_centi_deg           // 💡 교정 완료된 centi-degrees 규격 주입
                 );
                 send_mavlink_msg(&msg);
             break;
@@ -775,7 +795,6 @@ void Mavlink::on_timer_tick()
             break;
     }
 
-    // 다음 루프를 위해 스텝 시퀀스 인크리먼트 (0 ~ 9 순환)
     if (++step >= 10) {
         step = 0;
     }

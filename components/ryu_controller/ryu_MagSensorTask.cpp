@@ -72,7 +72,8 @@ void MagSensorTask::StartTask() {
         configMAX_PRIORITIES - 4, // 우선순위: IMU(MAX-2) 및 Baro(MAX-3)보다 낮게 배정하여 밀림 차단
         &_taskHandle,
         0                         // I2C 버스 자원 관리를 위해 수집 전용 Core 0번에 격리 배정
-    );
+    );    
 }
+
 
 } // namespace Controller

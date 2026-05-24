@@ -14,7 +14,7 @@
 #include <esp_err.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-
+#include "ryu_Types.hpp"
 namespace Controller{
 
 class Flight{    
@@ -36,7 +36,10 @@ class Flight{
         static void flight_task(void* pvParameters);
         TaskHandle_t getTaskHandle(){return _taskHandle;};        
         esp_err_t StartTask();
-        
+
+        // 2d rotation 조립하고 지자계의 정렬을 위한 함수.
+        Vector3f rotateMagVector(const Vector3f &raw_mag, float rot_rad);
+
     private:
         TaskHandle_t _taskHandle = nullptr;
         bool _initialized = false;

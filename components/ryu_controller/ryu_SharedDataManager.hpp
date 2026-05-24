@@ -96,10 +96,12 @@ public:
             int write_idx = 1 - _mag_latest_idx.load(std::memory_order_relaxed);
             _mag_buffer[write_idx] = new_data; 
             _mag_latest_idx.store(write_idx, std::memory_order_release);        
+            _is_mag_updated.store(true, std::memory_order_release); // 💡 게시 시 플래그 연동 자동화
         } else if constexpr (TypeEnum == Data_type::DT_BARO_DATA) {
             int write_idx = 1 - _baro_latest_idx.load(std::memory_order_relaxed);
             _baro_buffer[write_idx] = new_data; 
             _baro_latest_idx.store(write_idx, std::memory_order_release);
+            _is_baro_updated.store(true, std::memory_order_release); // 💡 게시 시 플래그 연동 자동화            
         } else if constexpr (TypeEnum == Data_type::DT_CURRENT_ATTITUDE) {
             int write_idx = 1 - _curatt_latest_idx.load(std::memory_order_relaxed);
             _currentAttitude[write_idx] = new_data; 
@@ -116,6 +118,7 @@ public:
             int write_idx = 1 - _gps_latest_idx.load(std::memory_order_relaxed);
             _gps_buffer[write_idx] = new_data; 
             _gps_latest_idx.store(write_idx, std::memory_order_release);
+            _is_gps_updated.store(true, std::memory_order_release); // 💡 게시 시 플래그 연동 자동화            
         }   
     }
 
@@ -149,6 +152,7 @@ public:
     void set_imu_calibrated(bool state) { _is_imu_calibrated.store(state, std::memory_order_release); }
     bool is_imu_calibrated() { return _is_imu_calibrated.load(std::memory_order_acquire); }
 
+
     void set_baro_updated(bool state) { _is_baro_updated.store(state, std::memory_order_release); }
     bool is_baro_updated() { return _is_baro_updated.exchange(false, std::memory_order_acq_rel); } 
 
@@ -157,6 +161,13 @@ public:
 
     void set_gps_updated(bool state) { _is_gps_updated.store(state, std::memory_order_release); }
     bool is_gps_updated() { return _is_gps_updated.exchange(false, std::memory_order_acq_rel); } 
+
+
+    // 2) 일반 관측 태스크 전용(Read-Only Peek): 플래그를 절대 소거하지 않고 순수 업데이트 유무 상태만 단순 조회
+    bool peek_baro_updated() { return _is_baro_updated.load(std::memory_order_acquire); }
+    bool peek_mag_updated()  { return _is_mag_updated.load(std::memory_order_acquire); }
+    bool peek_gps_updated()  { return _is_gps_updated.load(std::memory_order_acquire); }
+
 };
 
 } // namespace Controller

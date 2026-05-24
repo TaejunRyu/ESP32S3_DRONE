@@ -35,6 +35,9 @@ esp_err_t ImuSensorTask::initialize()
         Sensor::ICM20948::getInstance().set_include_mag(true);  // ak09916포함
     }
 
+    //Sensor::ICM20948::getInstance().calibration_mag_hard_iron();
+
+
     if(!SharedDataManager::getInstance().is_initialized()){
         SharedDataManager::getInstance().initialize();
     }

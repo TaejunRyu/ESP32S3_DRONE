@@ -215,20 +215,29 @@ void ICM20948::calibration_mag_hard_iron()
     Vector3f max_mag{-99999.0f, -99999.0f, -99999.0f};
     Vector3f min_mag{ 99999.0f,  99999.0f,  99999.0f}; 
 
+    ESP_LOGI(TAG, "AK09916 지자계 보정 시작: 드론을 모든 방향(8자)으로 끊임없이 돌리세요!");    
+    ESP_LOGI(TAG, "실제 유효 데이터 15,000 샘플을 수집합니다... (약 30초~1분 소요)");
+
+    // 💡 유령 데이터 중복 카운트를 막기 위해 진짜 유효 샘플 수(15,000개) 기준으로 변경
+    uint32_t total_valid_samples = 15000; 
+    uint32_t valid_count = 0;
+
     SensorData imudata;
-    ESP_LOGI(TAG, "지자계 보정 시작: 드론을 모든 방향(8자)으로 돌리세요 (약 30초)...");    
 
-    uint32_t total_count = 5000; 
-    uint32_t count = 0;
+    while (valid_count < total_valid_samples) {
+        
+        // 💡 [필수] IST8310 단일 측정 시작 레지스터 트리거 송신 (함수 내부에 없다면 여기서 처리)
+        // this->trigger_single_measurement(); 
 
-    while (count < total_count) {
-        esp_task_wdt_reset();
         this->read_data(imudata);
 
-        // 데이터가 실제로 업데이트되었을 때만 처리
-        if (imudata.is_mag_updated) {
-            ++count;
-            
+        // 💡 [핵심 안전장치] 데이터가 공백(0.0f)이거나 이전 값 홀딩 상태가 아닐 때만 처리
+        // (앞서 무효 데이터를 {0,0,0}으로 밀어주도록 송신단을 수정했으므로 크기 검사로 완벽 방어)
+        float data_norm = std::sqrt(imudata.mag.x*imudata.mag.x + imudata.mag.y*imudata.mag.y + imudata.mag.z*imudata.mag.z);
+        if (data_norm > 0.001f) {
+           
+            valid_count++; // 진짜 데이터가 들어왔을 때만 진행률 카운트 업!
+
             max_mag.x = std::max(imudata.mag.x, max_mag.x);
             max_mag.y = std::max(imudata.mag.y, max_mag.y);
             max_mag.z = std::max(imudata.mag.z, max_mag.z);
@@ -237,19 +246,21 @@ void ICM20948::calibration_mag_hard_iron()
             min_mag.y = std::min(imudata.mag.y, min_mag.y);
             min_mag.z = std::min(imudata.mag.z, min_mag.z);
 
-            // 500번 샘플링마다 진행률 출력 (중복 출력 방지)
-            if (count % 500 == 0) {
-                ESP_LOGW(TAG, "AK09916 : 보정 진행 중... (%d%%)", (count * 100) / total_count);
+            // 500번 유효 샘플마다 진행률 출력
+            if (valid_count % 500 == 0) {
+                ESP_LOGW(TAG, "AK09916 : 실제 데이터 수집 중... (%d%%)", (valid_count * 100) / total_valid_samples);
             }
         }
-        // CPU 독점을 막고 다른 태스크에 양보하기 위한 미세 딜레이
-        vTaskDelay(pdMS_TO_TICKS(1));
+
+        // IST8310의 하드웨어 측정 대기 시간(약 6~8ms)을 고려하여 
+        // 1ms 대신 5ms~8ms 딜레이를 주면 CPU 자원을 대폭 아낄 수 있습니다.
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 
     // 최종 하드 아이언 오프셋(중심점) 계산
     Vector3f offset_mag = (max_mag + min_mag) / 2.0f;
    
-    // 축별 반경 계산 및 0 나누기 방어코드 추가
+    // 축별 반경 계산 및 0 나누기 방어코드
     Vector3f avg_delte_mag = (max_mag - min_mag) / 2.0f;
     if (avg_delte_mag.x < 0.001f) avg_delte_mag.x = 1.0f;
     if (avg_delte_mag.y < 0.001f) avg_delte_mag.y = 1.0f;
@@ -262,7 +273,8 @@ void ICM20948::calibration_mag_hard_iron()
     scale_mag.y = avg_delta / avg_delte_mag.y;
     scale_mag.z = avg_delta / avg_delte_mag.z;
 
-    ESP_LOGW(TAG, "AK09916 HARD IRON 보정 완료!");
+    // 💡 로그 컴포넌트 명칭도 명확히 IST8310으로 수정
+    ESP_LOGW(TAG, "AK09916 HARD/SOFT IRON 보정 완료!");
     ESP_LOGW(TAG, "--------------------------------------------------");
     ESP_LOGW(TAG, "static inline constexpr float MAG_MAX_X      = %.4f;",   max_mag.x);
     ESP_LOGW(TAG, "static inline constexpr float MAG_MAX_Y      = %.4f;",   max_mag.y);
@@ -278,9 +290,7 @@ void ICM20948::calibration_mag_hard_iron()
     ESP_LOGW(TAG, "static inline constexpr float MAG_OFFSET_Z   = %.4f;",   offset_mag.z);
     ESP_LOGW(TAG, "--------------------------------------------------");
 
-    // 보정 완료 후 사용자가 로그를 읽을 수 있도록 대기 (콘솔 확인용)
     for (uint8_t ii = 0; ii < 10; ++ii) {
-        esp_task_wdt_reset();
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

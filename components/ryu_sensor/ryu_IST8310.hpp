@@ -62,13 +62,13 @@ class IST8310{
 
         static inline constexpr float SENSITIVITY   =  0.3f;   
         
+        static inline constexpr float MAG_SCALE_X    = 0.9917;
+        static inline constexpr float MAG_SCALE_Y    = 0.9948;
+        static inline constexpr float MAG_SCALE_Z    = 1.0138;
+        static inline constexpr float MAG_OFFSET_X   = 14.5500;
+        static inline constexpr float MAG_OFFSET_Y   = 3.6000;
+        static inline constexpr float MAG_OFFSET_Z   = -18.9000;
 
-        static inline constexpr float MAG_SCALE_X    = 1.8565;
-        static inline constexpr float MAG_SCALE_Y    = 0.8102;
-        static inline constexpr float MAG_SCALE_Z    = 0.8150;
-        static inline constexpr float MAG_OFFSET_X   = 18.7500;
-        static inline constexpr float MAG_OFFSET_Y   = -0.1500;
-        static inline constexpr float MAG_OFFSET_Z   = -0.6000;
 
 
         
