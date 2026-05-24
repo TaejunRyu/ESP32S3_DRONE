@@ -16,6 +16,7 @@
 #include "ryu_timer.hpp"
 #include "ryu_battery.hpp"
 #include "ryu_gps.hpp"
+#include "ryu_PidController.hpp"
 
 namespace Controller {
 
@@ -28,6 +29,8 @@ esp_err_t Flight::initialize(){
     if(!SharedDataManager::getInstance().is_initialized()){
         err = SharedDataManager::getInstance().initialize();
     }
+
+    PidControl::getInstance().reset();
 
     if(!Sensor::Gps::getInstance().is_initialized()){
         Sensor::Gps::getInstance().initialize();
@@ -87,6 +90,21 @@ void Flight::flight_task(void *pvParameters)
     kalman.init(0.0f, 0.0f, 0.0f);
 
 
+    auto& pid = PidControl::getInstance();
+
+    // 2. PID 파라미터 초기화 (구동 대상 하드웨어에 맞는 튜닝 파라미터 입력 필요)
+    // 값 형식: {Kp, Ki, Kd, I_Limit, Output_Limit}
+    Controller::PidParams angle_gain = {2.0f, 0.1f, 0.05f, 0.5f, 10.0f}; // 바깥 루프 (목표 각속도 rad/s 한계)
+    Controller::PidParams rate_gain  = {1.0f, 0.05f, 0.001f, 1.0f, 50.0f}; // 안쪽 루프 (최종 모터 출력 한계)
+
+    pid.setAngleParams(angle_gain, angle_gain, angle_gain); // Roll, Pitch, Yaw 동일 적용 예시
+    pid.setRateParams(rate_gain, rate_gain, rate_gain);
+    pid.reset();
+
+
+    // 가상 목표 및 센서 데이터 선언
+    Attitude_t target_pose = {0.0f, 0.0f, 0.0f}; // 정밀 호버링 (평평한 상태) 목표
+
     uint32_t loop_cnt = 0;        
     SensorData cur_imu_data {};
     Vector3f   cur_mag_data {};
@@ -108,84 +126,97 @@ void Flight::flight_task(void *pvParameters)
                 continue; 
             }
 
-
             cur_imu_data = sharedData.get_shared_data< Data_type::DT_IMU_DATA>();
-            static Vector3f previousMag{};
-            //ist8310작동시 ist8310의 데이터로 대치
-            if(sharedData.is_mag_updated()){
-                cur_mag_data = sharedData.get_shared_data< Data_type::DT_MAG_DATA>();                
-                //cur_imu_data.mag = cur_mag_data;   // 지자계를 대체한다.
-                //previousMag = cur_mag_data;
-            }else{ // 데이터를 일지 않을때에는 이전값을 보낸다.
-                //cur_imu_data.mag = previousMag;
+            if(cur_imu_data.is_mag_updated){
+                cur_imu_data.mag.normalize();
             }
-            
-            // 입력 데이터 가공 (입력이 도/초 단위일 경우 예측부 라디안 스케일링 일치 처리)
-            Vector3f gyro_rad = cur_imu_data.gyro * DEG_TO_RAD;
 
+            //IST8310 MagSensorTask에서 보내온 데이터를 받는다.
+            { // 이블럭을 제거하면 ak09916으로 mag가 대체되어진다.
+                cur_imu_data.mag = 0.0f;
+                if(sharedData.is_mag_updated()){  // 업데이트 될때만 받아와서 적용한다.
+                    cur_mag_data = sharedData.get_shared_data< Data_type::DT_MAG_DATA>();
+                    cur_imu_data.mag = cur_mag_data;   // 지자계를 대체한다.
+                    cur_imu_data.mag.normalize();        
+                }
+            }
             // [EKF 핵심 엔진 가동] 자이로 예측 후 가속도/지자계 순차 보정 처리
-            kalman.update(cur_imu_data.acc,gyro_rad, cur_imu_data.mag,dt);
-                        
-            // 진북 기준 최종 오일러 각 추출 (라디안 단위)
-            Attitude_t attitude = kalman.getEuler();
-
-            // 제어 및 외부 송신을 위해 도(Degree) 단위로 변환
-            attitude = attitude * RAD_TO_DEG;
+            kalman.update(  cur_imu_data.acc,
+                            cur_imu_data.gyro * DEG_TO_RAD, //// 입력 데이터 가공 (입력이 도/초 단위일 경우 예측부 라디안 스케일링 일치 처리)
+                            cur_imu_data.mag,
+                            dt);
             
-            // [필수] TARGET_TRUE_NORTH는 반드시 태스크 내부 static 또는 클래스 멤버 변수여야 합니다.
+            // 진북 기준 최종 오일러 각 추출 (라디안 단위)
+            Attitude_t curAttitude = kalman.getEuler();
+
             // 초기값은 우리나라 평균 편각인 -7.7f (서편각 7.7도)로 시작합니다.
-            const static float target_true_north = TARGET_TRUE_NORTH; 
+            static float target_true_north = TARGET_TRUE_NORTH * (M_PI / 180.0f); 
 
             // 1. GPS가 업데이트 되었을 때만 지자기 편각 필터링 수행 (Low-Pass Filter)
             if (SharedDataManager::getInstance().is_gps_updated()) {
                 gps_data_t mgps = SharedDataManager::getInstance().get_shared_data<Data_type::DT_GPS_DATA>();
-                
                 // GPS 가 정상 Fix 상태여야 magDec 신뢰도가 높습니다.
                 if (mgps.fixType >= 3 && mgps.horAcc < 3000) { 
-        
                     // mgps.magDec는 이미 '도(Degree)' 단위이므로 스케일링 없이 그대로 필터 적용
-                    //target_true_north = (target_true_north * 0.999f) + (mgps.magDec * 0.001f);
+                    target_true_north = (target_true_north * 0.999f) + ((mgps.magDec *DEG_TO_RAD * 0.001f));
                 }
             }
+                        
 
             // 3. 자북 방위각에 '단 한 번만' 편각을 더하여 진북 방위각 생성 (누적 방지)
-            float corrected_yaw = attitude.yaw + target_true_north;
+            curAttitude.yaw = curAttitude.yaw - target_true_north;
 
-            // Yaw 각도 범위를 0~360도로 정규화 바인딩
-            if (attitude.yaw < 0.0f)           attitude.yaw += 360.0f;
-            else if (attitude.yaw >= 360.0f)   attitude.yaw -= 360.0f;
+            // 4. NED 좌표계 표준 경계선 처리 (-PI ~ +PI) 필수 수행
+            while (curAttitude.yaw > M_PI)  curAttitude.yaw -= 2.0f * M_PI;
+            while (curAttitude.yaw < -M_PI) curAttitude.yaw += 2.0f * M_PI;
 
-            // 5. 최종 보정된 진북 기준의 yaw를 자세 제어(PID) 알고리즘에 투입
-            attitude.yaw = corrected_yaw; 
+            // 자세 데이터(RADIAN)...(대략 10hz 정도의 refresh할 데이터를 보냄.)
+            static uint16_t qgc_publish_count =0;
+            if (++qgc_publish_count >= 100) { 
+                qgc_publish_count = 0;
+                QgcAttitude_t qgcAtt;
+                qgcAtt.att      = curAttitude;
+                qgcAtt.speed    = cur_imu_data.gyro * DEG_TO_RAD;
+                sharedData.publish_data<Data_type::DT_QGC_ATTITUDE >(qgcAtt);
+            }
 
-            // QGC 모니터링 전용 Mavlink 버퍼 구조체 데이터 밀어넣기
-            attitude.data[3] = cur_imu_data.gyro.x;
-            attitude.data[4] = cur_imu_data.gyro.y;
-            attitude.data[5] = cur_imu_data.gyro.z;
-
-            // [중계자 복귀] 최종 수렴된 현재 수평 자세를 데이터 매니저에 즉시 업데이트
-            sharedData.publish_data<Data_type::DT_CURRENT_ATTITUDE>(attitude);
-            
             BaroData baroData{};
             if(sharedData.is_baro_updated()){ //40ms단위로 데이터가 들어온다.
                 baroData =  sharedData.get_shared_data<Data_type::DT_BARO_DATA>();
                 // ESP_LOGI(TAG, "|R: %8.5f |P: %8.5f |Y: %8.5f| gnd_pressure : %8.5f | pressure: %8.5f | alt:%8.5f | climb_rate: %8.5F", 
-                //         attitude.roll,        attitude.pitch,       attitude.yaw,
+                //         curAttitude.roll,        curAttitude.pitch,       curAttitude.yaw,
                 //         baroData.gnd_pressure ,baroData.pressure, baroData.altitude,baroData.climb_rate
                 //         );
             }
-            // 여기에 추후 PID 제어 루프를 탑재하시면 됩니다.
-            // run_pid_control(attitude, cur_imu_data.gyro);
+
+            // 자이로 데이터는 진동이 발생할경우( 필터 제공 )
+            static Vector3f filtered_rate = {0.0f, 0.0f, 0.0f};
+            const float alpha = 0.3f; 
+            filtered_rate.x = alpha * cur_imu_data.gyro.x + (1.0f - alpha) * filtered_rate.x;
+            filtered_rate.y = alpha * cur_imu_data.gyro.y + (1.0f - alpha) * filtered_rate.y;
+            filtered_rate.z = alpha * cur_imu_data.gyro.z + (1.0f - alpha) * filtered_rate.z;
+ 
+            // 3. 캐스케이드 PID 연산 수행
+            Vector3f motor_outputs = pid.updateCascade(target_pose, curAttitude, filtered_rate, dt);
+
+            // 4. 모터/서보 제어기에 출력값 전달 분배 처리
+
+
+            // NED 좌표 출력축 계산 결과 로그 출력
+            // if (++loop_cnt >= 20) { 
+            //     loop_cnt = 0;
+            //     ESP_LOGI(TAG, "PID Output -> Roll Out: %5.2f, Pitch Out: %5.2f, Yaw Out: %5.2f", 
+            //             motor_outputs.x, motor_outputs.y, motor_outputs.z);
+            // }
 
             // [출력 가독성 최적화] UART 병목 및 로깅 오버헤드를 막기 위한 50Hz(20ms) 주기 필터링 로그
             // if (++loop_cnt >= 20) { 
             //     loop_cnt = 0;
             //     ESP_LOGI(TAG, "|AX: %8.5f |AY: %8.5f |AZ: %8.5f | GX: %8.5f |GY: %8.5f |GZ: %8.5f | MX: %8.5f |MY: %8.5f |MZ: %8.5f |R: %8.5f |P: %8.5f |Y: %8.5f|", 
             //             cur_imu_data.acc.x,   cur_imu_data.acc.y,   cur_imu_data.acc.z,
-            //             gyro_rad.x,           gyro_rad.y,           gyro_rad.z,
+            //             cur_imu_data.gyro.x *DEG_TO_RAD,  cur_imu_data.gyro.y *DEG_TO_RAD,  cur_imu_data.gyro.z * DEG_TO_RAD,
             //             cur_imu_data.mag.x,   cur_imu_data.mag.y,   cur_imu_data.mag.z,
-            //             attitude.roll,        attitude.pitch,       attitude.yaw
-             
+            //             curAttitude.roll,        curAttitude.pitch,       curAttitude.yaw 
             //         );
             // }
         } else {

@@ -150,14 +150,11 @@ struct Vector3{
 // 2. 오일러 각도 기반 드론 자세 데이터
 struct Attitude_t {
     union{
-        float data[6] ={0.0f,};
+        float data[3] ={0.0f,};
         struct{
             float roll  ; // X축 회전 (도 또는 라디안)
             float pitch ; // Y축 회전
             float yaw   ; // Z축 회전
-            float gyro_x; // 추가되는 정보 보관        
-            float gyro_y; // 추가되는 정보 보관        
-            float gyro_z; // 추가되는 정보 보관        
         };
     };
  
@@ -183,6 +180,13 @@ struct Attitude_t {
         yaw = 0.0f;
     }
 };
+
+
+struct QgcAttitude_t{
+    Attitude_t att;
+    Vector3f   speed;
+};
+
 
 // 3. IMU 종합 데이터 패킷 (원시 데이터 관리용)
 struct SensorData {
@@ -232,6 +236,6 @@ struct gps_data_t {
     uint16_t    pDOP;           // 위치 정밀도 저하율 (0.01 단위)
     float       magDec ;        // 자기 편차 적용 (필요 시)
     float       relative_alt;   // 상대 고도 (홈 기준)
-    float       home_alt;       // 처음 시스템 시작시(gps가동시)의 고도  
+    float       home_alt = -9999.0f;       // 처음 시스템 시작시(gps가동시)의 고도  
     uint64_t    last_update_stamp;
 };

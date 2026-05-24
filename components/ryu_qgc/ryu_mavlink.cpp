@@ -648,18 +648,18 @@ void Mavlink::on_timer_tick()
     mavlink_message_t msg;
 
     // --- [최적화] 모든 데이터의 시간 동기화를 위해 진입 시점에 일괄 전송 데이터 캡처 ---
-    Attitude_t m_att     = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_CURRENT_ATTITUDE>();
+    QgcAttitude_t m_att     = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_QGC_ATTITUDE>();
     gps_data_t m_gps     = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_GPS_DATA>();    
     BaroData   m_alt     = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_BARO_DATA>();
 
     // 10Hz 타이머 매 틱마다 자세(Attitude) 데이터는 상시 전송 (최우선순위 가시성 확보)
     mavlink_msg_attitude_pack(ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, esp_timer_get_time()/1000, 
-                                m_att.roll  * DEG_TO_RAD, 
-                                m_att.pitch * DEG_TO_RAD, 
-                                m_att.yaw   * DEG_TO_RAD, 
-                                m_att.gyro_x* DEG_TO_RAD, 
-                                m_att.gyro_y* DEG_TO_RAD, 
-                                m_att.gyro_z* DEG_TO_RAD  
+                                m_att.att.roll, 
+                                m_att.att.pitch, 
+                                m_att.att.yaw, 
+                                m_att.speed.x, 
+                                m_att.speed.y, 
+                                m_att.speed.z  
                             );
     send_mavlink_msg(&msg);
 
@@ -702,7 +702,7 @@ void Mavlink::on_timer_tick()
                 static_cast<int16_t>(m_gps.velNorth), 
                 static_cast<int16_t>(m_gps.velEast),  // 누락 복구
                 static_cast<int16_t>(m_gps.velDown),  // 누락 복구
-                static_cast<uint16_t>(m_att.yaw * 100.0f) // 누락 복구 및 uint16_t 규격 매칭
+                static_cast<uint16_t>(m_att.att.yaw  * 100.0f) // 누락 복구 및 uint16_t 규격 매칭
             );
             send_mavlink_msg(&msg);
             break;
@@ -765,7 +765,7 @@ void Mavlink::on_timer_tick()
                     m_gps.verAcc,                                 
                     m_gps.speedAcc,                                 
                     0,                                          
-                    static_cast<uint16_t>(m_att.yaw * 100.0f) // uint16_t 규격 바인딩 [Anc18]
+                    static_cast<uint16_t>(m_att.att.yaw * 100.0f) // uint16_t 규격 바인딩 [Anc18]
                 );
                 send_mavlink_msg(&msg);
             break;

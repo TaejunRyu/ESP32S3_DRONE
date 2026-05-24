@@ -54,7 +54,6 @@ void MagSensorTask::ReadMagSensorTask(void* pvParameters) {
             esp_err_t err = ist8310.updateSample(mag_buf); 
             if (err == ESP_OK) {
                 ist8310.align_NED(mag_buf);
-                mag_buf.normalize();
                 //ESP_LOGW(TAG,"| mx: %8.3f | my: %8.3f | mz: %8.3f |", mag_buf.x , mag_buf.y , mag_buf.z );
                 SharedDataManager::getInstance().publish_data<Data_type::DT_MAG_DATA>(mag_buf);
                 SharedDataManager::getInstance().set_mag_updated(true);

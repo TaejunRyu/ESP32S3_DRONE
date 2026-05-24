@@ -319,11 +319,9 @@ esp_err_t ICM20948::updateSample(SensorData& sample){
                 sample.mag    = (data.mag -_mag_offset) * _mag_scale;
                 //sample.mag_timestamp  = data.mag_timestamp;
                 sample.is_mag_updated = data.is_mag_updated;
-                _mag_previous =sample.mag;   //정상으로 읽었을때 자료 보관.
     
             }else{
                 sample.is_mag_updated = false;
-                sample.mag = _mag_previous; // 읽지 못하였을경우 이전값으로....
             }     
         }
     }

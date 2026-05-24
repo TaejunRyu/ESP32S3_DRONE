@@ -6,7 +6,7 @@
     5) GZ 오른쪽으로 회전시 (+)
     6) X가 북을 가르킬때 MX 최대값   MY최소값   MZ(+)  
 
-2. 여기에 맞는 kalman filter를 구현하려한다. 
+2. 여기에 맞는 kalman filter를 구현하려한다. (구현완료)
     1) ESP32S3, ESP-IDF V6.1.0
     2) 최대한 ESP32S3의 특수기능(esp-dsp)을 사용. *****
     3) 화일명 ryu_KalmanFilter.hpp ,ryu_KalmanFilter.cpp
@@ -24,9 +24,9 @@
 
 3. PID Controller 구현 (구현 해야할것)
     1) 위 내용은 NED를 기준으로 처리하고 있다. 
-    2) PidController class 구현 (singleton으로)
+    2) PidControl class 구현 (singleton으로)
     3) namespace Controller
     4) filename  ryu_PidController.hpp , ryu_PidController.cpp
     5) 캐스케이드(2중 루프) PID 클래스 구조로 코드를 설계
-    6) 
+    6) 사용법 예제 제시. 
      
