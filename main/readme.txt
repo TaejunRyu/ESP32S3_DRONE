@@ -13,3 +13,61 @@
         │
         ▼
     [7. PID 제어 및 모터 출력 매핑]
+
+
+2. 핀설정 (MCU:ESP32S3)
+    1) I2C (완료) 
+        GPIO_NUM_5  : I2C SDA
+        GPIO_NUM_6  : I2C SCL
+
+    2) GPS(완료)
+        GPIO_NUM_7  : GPS RX
+        GPIO_NUM_8  : GPS TX
+
+    3) SPI(완료)
+        GPIO_NUM_9  : ICM29048  CS_PIN
+        GPIO_NUM_10 : BMP388    CS_PIN
+        GPIO_NUM_11 : SPI_MOSI 
+        GPIO_NUM_12 : SPI_SLCK  
+        GPIO_NUM_13 : SPI_MISO
+
+    4) MOTOR (4EA)
+        GPIO_NUM_1
+        GPIO_NUM_2
+        GPIO_NUM_41
+        GPIO_NUM_42
+
+    
+    5) SERVO MOTOR (1EA)
+        GPIO_NUM_14
+
+    6) FLYSKY CONTROLLER (UART 2)
+        GPIO_NUM_17
+        GPIO_NUM_18
+
+    7) BATTERY CHECK 
+        GPIO_NUM_3
+
+    8) BUZZER 
+        GPIO_NUM_15
+
+    9) LED
+
+
+
+    핀 번호 (GPIO)추천                              용도특징 및 장점
+    GPIO 3, 4아날로그 센서 (배터리 전압 체크 등)     ADC1 채널에 속해 있어 전압 측정에 가장 안정적입니다.
+    GPIO 15, 16상태 표시 LED / 부저 (Buzzer)        디지털 입출력이 매우 자유롭고 간섭이 없습니다.
+    GPIO 38, 39, 40추가 센서 (초음파, 광류 센서 등) 고속 신호 및 디지털 통신에 문제없이 작동합니다.
+    GPIO 47, 48사용자 버튼 / 스위치                 부팅에 영향을 주지 않는 순수 디지털 GPIO입니다.
+    GPIO 35, 36, 37기타 주변 장치내부               풀업/풀다운 간섭이 없는 깔끔한 핀들입니다.
+    
+    ⚠️ 남은 핀 중 '조건부'로만 써야 하는 주의 핀 (비추천)아래 핀들은 칩 내부적으로 특수 기능과 연결되어 있어, 
+    일반적인 용도로 쓰면 드론이 부팅되지 않거나 오작동할 수 있으므로 최대한 비워두시는 것을 권장합니다.
+    GPIO 21: 내부 플래시 메모리 전압 설정(V_DD_SDIO)과 관련된 스트래핑 핀입니다.
+    GPIO 19, 20: USB 데이터 라인(D-, D+)이므로 PC와 데이터 통신 및 코드 업로드를 위해 무조건 비워두어야 합니다.
+    GPIO 0, 45, 46: 부팅 모드 결정 핀입니다. 전원이 켜질 때 이 핀에 신호가 들어가면 칩이 다운로드 모드로 진입해 드론이 켜지지 않습니다.
+    💡 드론 제작을 위한 추가 활용 팁남은 핀 중에서 드론 필수 기능으로 아래 두 가지는 꼭 구현하시는 것을 추천합니다.
+    배터리 전압 감지 (Voltage Divider): GPIO 3 또는 4번에 저항 분배 회로를 연결하여 리포(LiPo) 배터리의 잔량을 실시간으로 체크하세요.
+    상태 LED 및 부저: GPIO 15, 16번에 연결하여 드론의 시동(Arming) 상태나 에러, 배터리 부족 경고음을 출력하면 안전 비행에 큰 도움이 됩니다.
+    

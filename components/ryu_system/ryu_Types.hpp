@@ -242,3 +242,23 @@ struct gps_data_t {
     float       home_alt = -9999.0f;       // 처음 시스템 시작시(gps가동시)의 고도  
     uint64_t    last_update_stamp;
 };
+
+
+// RC 데이터가 어디서 들어오는지에 따라 RC 데이터 타입을 구분하기 위한 열거형과 구조체 정의
+enum RemoteControlType{
+    RC_FLYSKY,
+    RC_QGC
+};
+
+// 4. RC 조종 데이터 패킷
+struct rc_data_t {
+    float throttle;  // 스로틀 (0~100%)
+    float roll;      // 롤 (-100~100)
+    float pitch;     // 피치 (-100~100)
+    float yaw;       // 요 (-100~100)
+    float aux1;      // 보조 채널 1 (고도 유지)
+    float aux2;      // 보조 채널 2
+    float aux3;      // 보조 채널 3 (SWC 3단)
+    float aux4;      // 보조 채널 4
+    RemoteControlType type;
+};

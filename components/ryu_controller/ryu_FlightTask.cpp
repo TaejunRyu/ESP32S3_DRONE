@@ -1,5 +1,6 @@
 #include "ryu_FlightTask.hpp"
 
+#include <algorithm>
 #include <esp_timer.h>
 #include <esp_log.h>
 #include <esp_task_wdt.h>
@@ -18,6 +19,7 @@
 #include "ryu_battery.hpp"
 #include "ryu_gps.hpp"
 #include "ryu_PidController.hpp"
+#include "ryu_motor.hpp"
 
 namespace Controller {
 
@@ -71,6 +73,10 @@ esp_err_t Flight::initialize(){
     if(!Service::Mavlink::get_instance().is_initialized()){
         Service::Mavlink::get_instance().initialize();
         Service::Mavlink::get_instance().StartTask();
+    }
+
+    if(!Driver::Motor::get_instance().is_initialized()){
+        err = Driver::Motor::get_instance().initialize();
     }
 
     return err;
@@ -228,8 +234,8 @@ void Flight::flight_task(void *pvParameters)
             if(sharedData.is_baro_updated()){ //40ms단위로 데이터가 들어온다.
                 baroData =  sharedData.get_shared_data<Data_type::DT_BARO_DATA>();
                 v_kalman.update(baroData.altitude); // 40ms 주기 보정
-                ESP_LOGI(TAG, "Baro -> gnd_pressure: %5.2f, pressure: %5.2f, altitude: %5.2f", 
-                            baroData.gnd_pressure ,baroData.pressure,baroData.altitude);
+                // ESP_LOGI(TAG, "Baro -> gnd_pressure: %5.2f, pressure: %5.2f, altitude: %5.2f", 
+                //             baroData.gnd_pressure ,baroData.pressure,baroData.altitude);
             }
 
             // gps의 고도와 융합.
@@ -257,14 +263,39 @@ void Flight::flight_task(void *pvParameters)
             filtered_rate.x = alpha * cur_imu_data.gyro.x * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.x;
             filtered_rate.y = alpha * cur_imu_data.gyro.y * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.y;
             filtered_rate.z = alpha * cur_imu_data.gyro.z * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.z;
+            
+            static float target_rc_throttle =0.0f;
+            if(sharedData.is_rc_updated()){
+                rc_data_t rc_data = sharedData.get_shared_data<Data_type::DT_RC_DATA>();
+                // RC 입력이 유효한 범위 내에 있을 때만 목표 자세에 반영 (예: -45도 ~ +45도)
+                if (std::abs(rc_data.roll) < 45.0f && std::abs(rc_data.pitch) < 45.0f && std::abs(rc_data.yaw) < 45.0f) {
+                    target_pose.roll  = rc_data.roll * DEG_TO_RAD;  // RC 입력을 라디안으로 변환하여 목표 자세에 적용
+                    target_pose.pitch = rc_data.pitch * DEG_TO_RAD;
+                    target_pose.yaw   = rc_data.yaw * DEG_TO_RAD;
+                    target_rc_throttle = rc_data.throttle; // RC 스로틀 입력을 별도로 저장하여 고도 제어에 활용 가능
+
+                    // target_pose.roll         = target_pose.roll     ;  //* 0.3f;
+                    // target_pose.pitch        = target_pose.pitch    ;  //* 0.3f;
+                    // target_pose.yaw          = target_pose.yaw      ;  //* 1.5f;
+                    // target_rc_throttle       = target_rc_throttle * 10.0f;
+                }
+                // ESP_LOGI(TAG, "RC Input -> Throttle: %5.2f, Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f", rc_data.throttle, rc_data.roll, rc_data.pitch, rc_data.yaw);
+            }
 
             // -------------------------------------------------------------
             // 핵심 연산: 자세와 고도 제어 명령을 병렬 독립 연산 처리
             // -------------------------------------------------------------
-            float target_altitude  = 1.5f;               // 1.5m 고도 홀딩 명령
             Vector3f att_outputs = pid.updateCascade(target_pose, curAttitude, filtered_rate, dt);
-            float base_throttle  = pid.updateAltitudeCascade(target_altitude, current_alt, current_vel, dt);
+
+            // 고도 제어는 RC 스로틀 입력과 독립적으로 병렬 처리하여, RC 스로틀이 0~100% 범위 내에서 고도 제어 출력에 가감산될 수 있도록 설계
+            float target_altitude  = 1.5f;               // 1.5m 고도 홀딩 명령
+            float alt_throttle_offset  = pid.updateAltitudeCascade(target_altitude, current_alt, current_vel, dt);
             
+            alt_throttle_offset = std::clamp(alt_throttle_offset, -150.0f, 150.0f);
+
+
+            float base_throttle = std::max(target_rc_throttle + alt_throttle_offset, 50.0f);
+
             // -------------------------------------------------------------
             // 최종 믹싱 단계: 고도 스로틀(Base)에 자세 복원력을 축별 가감산 (Quadcopter X-Type / NED 기준)
             // -------------------------------------------------------------
@@ -291,42 +322,26 @@ void Flight::flight_task(void *pvParameters)
             if (pwm_m4 > 2000) pwm_m4 = 2000; 
             if (pwm_m4 < 1000) pwm_m4 = 1000;
 
-
-            // 실제 ESP32-S3 MCPWM 이나 LEDC 드라이버 채널에 고속 펄스 폭 업데이트
-            // mcpwm_set_duty_in_us(..., pwm_m1);
-
-
-
+            Driver::Motor::get_instance().update_compare_value(pwm_m1, pwm_m2, pwm_m3, pwm_m4);
+            if (++loop_cnt >= 20) { 
+                loop_cnt = 0;
+                ESP_LOGI(TAG, "Motor PWM -> M1: %4d, M2: %4d, M3: %4d, M4: %4d", pwm_m1, pwm_m2, pwm_m3, pwm_m4);
+            }
+            
             // -------------------------------------------------------------
             // [확장 마감] 자세 및 수직 상태 데이터 QGC 게시 연동 (10Hz)
             // -------------------------------------------------------------
             static uint16_t qgc_publish_count = 0;
             if (++qgc_publish_count >= 100) { 
-                qgc_publish_count = 0;
-                
+                qgc_publish_count = 0;                
                 QgcAttitude_t qgcAtt;
                 qgcAtt.att      = curAttitude;                  // 진북 보정 완료된 오일러각
                 qgcAtt.speed    = cur_imu_data.gyro * DEG_TO_RAD; // 각속도 라디안
-                
-                // 💡 수직 칼만 필터가 계산한 정밀 고도와 속도를 10Hz 시퀀스에 결합합니다.
                 qgcAtt.base_throttle = base_throttle;
                 qgcAtt.alt      = current_alt; 
                 qgcAtt.v_speed  = current_vel; 
-
-                // 공유 메모리 매니저에 안전하게 배포 (락프리 더블 버퍼링 작동)
                 sharedData.publish_data<Data_type::DT_QGC_ATTITUDE>(qgcAtt);
             }
-
-
-
-
-            
-            // NED 좌표 출력축 계산 결과 로그 출력
-            // if (++loop_cnt >= 20) { 
-            //     loop_cnt = 0;
-            //     ESP_LOGI(TAG, "PID Output -> Roll Out: %5.2f, Pitch Out: %5.2f, Yaw Out: %5.2f", 
-            //             motor_outputs.x, motor_outputs.y, motor_outputs.z);
-            // }
 
             // [출력 가독성 최적화] UART 병목 및 로깅 오버헤드를 막기 위한 50Hz(20ms) 주기 필터링 로그
             // if (++loop_cnt >= 20) { 

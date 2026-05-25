@@ -13,4 +13,7 @@ idf_component_register(
         esp_adc
         freertos
         led_strip
+        #esp_driver_ledc 
+        #esp_adc 
+        esp_driver_mcpwm
 )

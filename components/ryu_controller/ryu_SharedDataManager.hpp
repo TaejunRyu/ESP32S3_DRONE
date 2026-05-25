@@ -17,6 +17,7 @@ enum class Data_type {
     DT_TARGET_ATTITUDE,
     DT_GPS_DATA,
     DT_QGC_ATTITUDE,
+    DT_RC_DATA
 };
 
 template <Data_type T> struct DataTypeTraits;
@@ -27,7 +28,7 @@ template <> struct DataTypeTraits<Data_type::DT_CURRENT_ATTITUDE>   { using Type
 template <> struct DataTypeTraits<Data_type::DT_TARGET_ATTITUDE>    { using Type = Attitude_t; };
 template <> struct DataTypeTraits<Data_type::DT_QGC_ATTITUDE>       { using Type = QgcAttitude_t; };
 template <> struct DataTypeTraits<Data_type::DT_GPS_DATA>           { using Type = gps_data_t; };
-
+template <> struct DataTypeTraits<Data_type::DT_RC_DATA>            { using Type = rc_data_t; };
 
 
 class SharedDataManager {
@@ -43,6 +44,7 @@ private:
     QgcAttitude_t   _qgcAttitude[2]      = {}; // MAVLINK로 QGC에 ATTITUDE/SPEED를 위하여 전송 
     gps_data_t      _gps_buffer[2]       = {};    
     Vector3f        _mag_buffer[2]       = {};
+    rc_data_t       _rc_buffer[2]        = {};
 
     std::atomic<int> _imu_latest_idx{0};
     std::atomic<int> _baro_latest_idx{0};
@@ -51,11 +53,13 @@ private:
     std::atomic<int> _qgcatt_latest_idx{0};
     std::atomic<int> _gps_latest_idx{0};
     std::atomic<int> _mag_latest_idx{0};
+    std::atomic<int> _rc_latest_idx{0};
 
     std::atomic<bool> _is_imu_calibrated;
     std::atomic<bool> _is_baro_updated;
     std::atomic<bool> _is_mag_updated;
     std::atomic<bool> _is_gps_updated;
+    std::atomic<bool> _is_rc_updated;
 
     bool _initialized = false;
 public:
@@ -64,7 +68,8 @@ public:
         _is_imu_calibrated.store(false, std::memory_order_relaxed);
         _is_baro_updated.store(false, std::memory_order_relaxed);
         _is_mag_updated.store(false, std::memory_order_relaxed);        
-        _is_gps_updated.store(false, std::memory_order_relaxed);        
+        _is_gps_updated.store(false, std::memory_order_relaxed);
+        _is_rc_updated.store(false, std::memory_order_relaxed);
         _initialized = true;
         return ESP_OK;
     };
@@ -119,7 +124,12 @@ public:
             _gps_buffer[write_idx] = new_data; 
             _gps_latest_idx.store(write_idx, std::memory_order_release);
             _is_gps_updated.store(true, std::memory_order_release); // 💡 게시 시 플래그 연동 자동화            
-        }   
+        } else if constexpr (TypeEnum == Data_type::DT_RC_DATA) {
+            int write_idx = 1 - _rc_latest_idx.load(std::memory_order_relaxed);
+            _rc_buffer[write_idx] = new_data; 
+            _rc_latest_idx.store(write_idx, std::memory_order_release);
+            _is_rc_updated.store(true, std::memory_order_release); // 💡 게시 시 플래그 연동 자동화            
+        }
     }
 
     // 2. 데이터 획득 (Multi-reader 환경 안전)
@@ -146,6 +156,9 @@ public:
         } else if constexpr (TypeEnum == Data_type::DT_GPS_DATA) {
             int read_idx = _gps_latest_idx.load(std::memory_order_acquire);
             return _gps_buffer[read_idx]; 
+        } else if constexpr (TypeEnum == Data_type::DT_RC_DATA) {
+            int read_idx = _rc_latest_idx.load(std::memory_order_acquire);
+            return _rc_buffer[read_idx]; 
         }
     }
 
@@ -162,11 +175,15 @@ public:
     void set_gps_updated(bool state) { _is_gps_updated.store(state, std::memory_order_release); }
     bool is_gps_updated() { return _is_gps_updated.exchange(false, std::memory_order_acq_rel); } 
 
+    void set_rc_updated(bool state) { _is_rc_updated.store(state, std::memory_order_release); }
+    bool is_rc_updated() { return _is_rc_updated.exchange(false, std::memory_order_acq_rel); } 
+
 
     // 2) 일반 관측 태스크 전용(Read-Only Peek): 플래그를 절대 소거하지 않고 순수 업데이트 유무 상태만 단순 조회
     bool peek_baro_updated() { return _is_baro_updated.load(std::memory_order_acquire); }
     bool peek_mag_updated()  { return _is_mag_updated.load(std::memory_order_acquire); }
     bool peek_gps_updated()  { return _is_gps_updated.load(std::memory_order_acquire); }
+    bool peek_rc_updated()   { return _is_rc_updated.load(std::memory_order_acquire); }
 
 };
 

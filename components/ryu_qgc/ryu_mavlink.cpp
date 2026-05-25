@@ -5,23 +5,17 @@
 #include <string_view>
 #include <freertos/FreeRTOS.h>  // FreeRTOS 기본 설정 및 정의
 #include <freertos/timers.h>    // 소프트웨어 타이머 API 전용 헤더
-//#include <driver/uart.h>
 #include <lwip/sockets.h>
 #include <esp_timer.h>
 
 #include "ryu_Config.hpp"
 #include "ryu_ParamTable.hpp"
 #include "ryu_timer.hpp"
-// #include "ryu_pid.h"
 #include "ryu_espnow.hpp"
-// #include "ryu_buzzer.h"
-// #include "ryu_config.h"
 #include "ryu_gps.hpp"
 #include "ryu_battery.hpp"
-// #include "ryu_flight_task.h"
-// #include "ryu_flight_event.h"
-// #include "ryu_utils.h"
-#include  "ryu_SharedDataManager.hpp"
+#include "ryu_SharedDataManager.hpp"
+#include "ryu_Types.hpp"
 
 namespace Service{
 
@@ -98,38 +92,37 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
     switch (msg->msgid) {      
 
         case MAVLINK_MSG_ID_MANUAL_CONTROL:{
-            // // x, y, z, r 값은 이미 -1000 ~ 1000 (또는 z는 0~1000) 범위입니다.
-            // float y = static_cast<float>(mavlink_msg_manual_control_get_x(msg)); // Roll
-            // float x = static_cast<float>(mavlink_msg_manual_control_get_y(msg)); // Pitch
-            // float z = static_cast<float>(mavlink_msg_manual_control_get_z(msg)); // Throttle
-            // float r = static_cast<float>(mavlink_msg_manual_control_get_r(msg)); // Yaw
+            // x, y, z, r 값은 이미 -1000 ~ 1000 (또는 z는 0~1000) 범위입니다.
+            float y = static_cast<float>(mavlink_msg_manual_control_get_x(msg)); // Roll
+            float x = static_cast<float>(mavlink_msg_manual_control_get_y(msg)); // Pitch
+            float z = static_cast<float>(mavlink_msg_manual_control_get_z(msg)); // Throttle
+            float r = static_cast<float>(mavlink_msg_manual_control_get_r(msg)); // Yaw
 
-            // rc_data_t m_rc;
+            rc_data_t m_rc;
 
-            // // 1. Throttle (0~1000 -> 0~100)
-            // m_rc.throttle = z * 0.1f; 
+            // 1. Throttle (0~1000 -> 0~100)
+            m_rc.throttle = z * 0.1f; 
 
-            // // 2. Roll/Pitch/Yaw (-1000~1000 -> -100~100)
-            // m_rc.roll  = x * 0.1f;
-            // m_rc.pitch = y * 0.1f;
-            // m_rc.yaw   = r * 0.1f;
+            // 2. Roll/Pitch/Yaw (-1000~1000 -> -100~100)
+            m_rc.roll  = x * 0.1f;
+            m_rc.pitch = y * 0.1f;
+            m_rc.yaw   = r * 0.1f;
 
-            // // 안전을 위한 범위 제한
-            // m_rc.throttle = std::clamp(m_rc.throttle,      0.0f, 100.0f);
-            // m_rc.roll     = std::clamp(m_rc.roll,       -100.0f, 100.0f);
-            // m_rc.pitch    = std::clamp(m_rc.pitch,      -100.0f, 100.0f);
-            // m_rc.yaw      = std::clamp(m_rc.yaw,        -100.0f, 100.0f);
-            // m_rc.type     = Service::RC_QGC;
-            // m_rc.receive_time = esp_timer_get_time();
+            // 안전을 위한 범위 제한
+            m_rc.throttle = std::clamp(m_rc.throttle,      0.0f, 100.0f);
+            m_rc.roll     = std::clamp(m_rc.roll,       -100.0f, 100.0f);
+            m_rc.pitch    = std::clamp(m_rc.pitch,      -100.0f, 100.0f);
+            m_rc.yaw      = std::clamp(m_rc.yaw,        -100.0f, 100.0f);
+            m_rc.type     = RC_QGC;
 
-            // // 이하의 숫자는 0으로 처리.....
-            // // Utils::Apply_DeadZone(m_rc.roll ,2.0f);
-            // // Utils::Apply_DeadZone(m_rc.pitch,2.0f);
-            // // Utils::Apply_DeadZone(m_rc.yaw  ,3.0f);
+            // 이하의 숫자는 0으로 처리.....
+            m_rc.roll  = (std::abs(m_rc.roll) < 2.0f) ? 0.0f : m_rc.roll;
+            m_rc.pitch = (std::abs(m_rc.pitch) < 2.0f) ? 0.0f : m_rc.pitch;
+            m_rc.yaw   = (std::abs(m_rc.yaw) < 3.0f) ? 0.0f : m_rc.yaw;
 
-            // portENTER_CRITICAL(&_qgc_lock);
-            // _qgc_rc_data = m_rc;
-            // portEXIT_CRITICAL(&_qgc_lock); 
+            Controller::SharedDataManager::getInstance().publish_data<Controller::Data_type::DT_RC_DATA>(m_rc);
+            Controller::SharedDataManager::getInstance().set_rc_updated(true); // RC 데이터 업데이트 플래그 세트
+
             break;
         }
         case MAVLINK_MSG_ID_SYSTEM_TIME:{
