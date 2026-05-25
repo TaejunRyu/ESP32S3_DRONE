@@ -1,22 +1,26 @@
+
+
 #pragma once
 #define MAVLINK_USE_MESSAGE_INFO
 #include <esp_err.h>
 #include <c_library_v2/common/mavlink.h>
 #include <c_library_v2/mavlink_get_info.h>
 #include "ryu_Types.hpp"
+//#include "ryu_StateManager.hpp"
+namespace Controller{
+    enum class systemState_e : uint8_t; // 전방 선언
+}
 
-//#include "ryu_flysky.h"
-namespace Service
-{
-
-  
+namespace Service{
+    
 class Mavlink{
     private:
         static constexpr const char* TAG = "Mavlink";
     
         struct heartbeat_t{
-            uint8_t     base_mode;
-            uint32_t    custom_mode;
+            volatile uint8_t         base_mode;
+            volatile uint32_t        custom_mode;
+            volatile Controller::systemState_e   system_status; // 시스템 상태 추가
         };
 
     private:

@@ -15,6 +15,7 @@
 #include "ryu_gps.hpp"
 #include "ryu_battery.hpp"
 #include "ryu_SharedDataManager.hpp"
+#include "ryu_StateManager.hpp"
 #include "ryu_Types.hpp"
 
 namespace Service{
@@ -116,9 +117,9 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
             m_rc.type     = RC_QGC;
 
             // 이하의 숫자는 0으로 처리.....
-            m_rc.roll  = (std::abs(m_rc.roll) < 2.0f) ? 0.0f : m_rc.roll;
-            m_rc.pitch = (std::abs(m_rc.pitch) < 2.0f) ? 0.0f : m_rc.pitch;
-            m_rc.yaw   = (std::abs(m_rc.yaw) < 3.0f) ? 0.0f : m_rc.yaw;
+            m_rc.roll  = (std::abs(m_rc.roll) < 2.0f)   ? 0.0f : m_rc.roll;
+            m_rc.pitch = (std::abs(m_rc.pitch) < 2.0f)  ? 0.0f : m_rc.pitch;
+            m_rc.yaw   = (std::abs(m_rc.yaw) < 3.0f)    ? 0.0f : m_rc.yaw;
 
             Controller::SharedDataManager::getInstance().publish_data<Controller::Data_type::DT_RC_DATA>(m_rc);
             Controller::SharedDataManager::getInstance().set_rc_updated(true); // RC 데이터 업데이트 플래그 세트
@@ -232,22 +233,27 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
         // 3. 시동(ARM)이나 특정 명령을 내릴 때
         case MAVLINK_MSG_ID_COMMAND_LONG: { //76
             mavlink_command_long_t cmd;
-            mavlink_msg_command_long_decode(msg, &cmd);       
-            
-            // 나에게 온것이 아니면 처리하지 않음.
+            mavlink_msg_command_long_decode(msg, &cmd);                   
             if (cmd.target_system != ConfigMavlink::sys_id  || 
                 (cmd.target_component !=ConfigMavlink::comp_id  && cmd.target_component != 0)) {
                 break;
             }
+
             switch (cmd.command){
                 case MAV_CMD_COMPONENT_ARM_DISARM:{ //400
                     send_mav_command_ack(cmd.command, MAV_RESULT_ACCEPTED,0,0,msg->sysid,msg->compid);     
                     if (cmd.param1 > 0.5f && cmd.param1 < 1.5f) {
-                        //esp_event_post(Event::SYS_MODE_EVENT_BASE,Event::MODE_ARM,nullptr,0,0);    
+                        Controller::DroneStatusManager::getInstance().setArmed(true); // 시동
+                        Controller::DroneStatusManager::getInstance().setSystemState(Controller::systemState_e::SYS_STATE_ACTIVE);  
+                        _heartbeat.base_mode  |= MAV_MODE_FLAG_SAFETY_ARMED;
+                        _heartbeat.system_status = Controller::systemState_e::SYS_STATE_ACTIVE; // 시스템 상태를 Active로 업데이트
                     } else if (cmd.param1 < 0.5f) {
-                        //esp_event_post(Event::SYS_MODE_EVENT_BASE,Event::MODE_DISARM,nullptr,0,0);    
+                        Controller::DroneStatusManager::getInstance().setArmed(false);
+                        Controller::DroneStatusManager::getInstance().setSystemState(Controller::systemState_e::SYS_STATE_STANDBY); // 시스템 상태를 Standby로 업데이트
+                        _heartbeat.base_mode  &= ~MAV_MODE_FLAG_SAFETY_ARMED;
+                        _heartbeat.system_status = Controller::systemState_e::SYS_STATE_STANDBY; // 시스템 상태를 Standby로 업데이트
                     }
-                    ESP_LOGI(TAG,"MAV_CMD_COMPONENT_ARM_DISARM_func Param1: %8.5f",cmd.param1);
+                    ESP_LOGI(TAG,"_heartbeat.system_status :%d ",_heartbeat.system_status);
                     break;
                 }
                 case MAV_CMD_NAV_TAKEOFF:{ //22
@@ -333,76 +339,11 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
             // 기본적인것이 끝나면 처리할것.
             mavlink_set_mode_t  cmd;
             mavlink_msg_set_mode_decode(msg, &cmd);
-            
             if( cmd.target_system != ConfigMavlink::sys_id ) break;
             _heartbeat.base_mode = cmd.base_mode;
-            if (_heartbeat.base_mode & MAV_MODE_FLAG_CUSTOM_MODE_ENABLED) {
-                
-
-                switch (cmd.custom_mode) {
-                    case (uint32_t)0x00010000: // Manual                         
-                        _heartbeat.custom_mode = (uint32_t)0x00010000; //qgc용                        
-                        // ENV::g_sys.flight_mode = ENV::MODE_MANUAL;                //fc용       
-                        // ENV::g_sys.hold_mode = ENV::flight_hold_mode::MODE_NORMAL;
-                        break;
-                    case (uint32_t)0x00020000: // Altitude control
-                        // GPS가 없거나 끊겼을 때 작동합니다. 
-                        // 기체의 고도와 바라보는 방향(Yaw Heading)은 그 자리에 고정(Hold)되지만, 
-                        // 수평 위치는 바람에 밀릴 수 있습니다
-                        _heartbeat.custom_mode = (uint32_t)0x00020000;
-                        // ENV::g_sys.flight_mode = ENV::MODE_ALTCTL;                       
-                        // ENV::g_sys.hold_mode = ENV::flight_hold_mode::MODE_NORMAL;
-                        break;
-                    case (uint32_t)0x00030000: // position control
-                        // 가장 대표적인 홀드 모드입니다. 
-                        // 키를 놓으면 회전 각도(Yaw Hold)뿐만 아니라 GPS를 기반으로 위도, 경도, 고도까지 그 자리에 칼같이 고정합니다.
-                        _heartbeat.custom_mode = (uint32_t)0x00030000;
-                        // ENV::g_sys.flight_mode = ENV::MODE_POSCTL;                       
-                        // ENV::g_sys.hold_mode = ENV::flight_hold_mode::MODE_NORMAL;
-                        break;
-                    case (uint32_t)0x00040000: // Offboard
-                        _heartbeat.custom_mode = (uint32_t)0x00040000;
-                        // ENV::g_sys.flight_mode = ENV::MODE_OFFBOARD;                       
-                        // ENV::g_sys.hold_mode = ENV::flight_hold_mode::MODE_NORMAL;
-                        break;
-                    case (uint32_t)0x00050000: // Acro
-                        _heartbeat.custom_mode = (uint32_t)0x00050000;
-                        // ENV::g_sys.flight_mode = ENV::MODE_ACRO;                       
-                        // ENV::g_sys.hold_mode = ENV::flight_hold_mode::MODE_NORMAL;
-                        break;
-                    case (uint32_t)0x00060000: // rattitude
-                        _heartbeat.custom_mode = (uint32_t)0x00060000;
-                        // ENV::g_sys.flight_mode = ENV::MODE_MANUAL;                       
-                        // ENV::g_sys.hold_mode = ENV::flight_hold_mode::MODE_NORMAL;
-                        break;    
-                    case (uint32_t)0x00070000: // Stabilize
-                        _heartbeat.custom_mode = (uint32_t)0x00070000;
-                        // ENV::g_sys.flight_mode = ENV::MODE_STABILIZED;                       
-                        // ENV::g_sys.hold_mode = ENV::flight_hold_mode::MODE_NORMAL;
-                        break;
-                    case (uint32_t)0x03040000: // standby
-                        // 비행 중 QGC 패널에서 대기(Hold/Loiter) 버튼을 누르면 
-                        // 기체가 자동으로 조종권을 가져가서 현재 위치와 방위각을 유지하며 제자리 비행을 합니다.
-                        _heartbeat.custom_mode = (uint32_t)0x03040000;
-                        // ENV::g_sys.flight_mode = ENV::MODE_MANUAL;                       
-                        // ENV::g_sys.hold_mode = ENV::flight_hold_mode::MODE_USER_HOLD_MODE;
-                        break;
-                    case (uint32_t)0x04040000: // Mission
-                        _heartbeat.custom_mode = (uint32_t)0x04040000;
-                        // ENV::g_sys.flight_mode = ENV::MODE_MISSION;                       
-                        // ENV::g_sys.hold_mode = ENV::flight_hold_mode::MODE_NORMAL;
-                        break; 
-                    case (uint32_t)0x05040000: // Return 
-                        _heartbeat.custom_mode = (uint32_t)0x05040000;
-                        // ENV::g_sys.flight_mode = ENV::MODE_RTL;                       
-                        // ENV::g_sys.hold_mode = ENV::flight_hold_mode::MODE_NORMAL;
-                        break;
-                    case (uint32_t)0x09040000: // Land
-                        _heartbeat.custom_mode = (uint32_t)0x09040000;
-                        // ENV::g_sys.flight_mode = ENV::MODE_PRECISION_LAND;                       
-                        // ENV::g_sys.hold_mode = ENV::flight_hold_mode::MODE_NORMAL;
-                        break;
-                }
+            if (_heartbeat.base_mode & MAV_MODE_FLAG_CUSTOM_MODE_ENABLED) {                
+                _heartbeat.custom_mode = (uint32_t)cmd.custom_mode; //qgc용                        
+                Controller::DroneStatusManager::getInstance().setFlyingMode((Controller::flyingMode_e)cmd.custom_mode); // 내부 상태 매니저에도 반영
             }
             ESP_LOGI(TAG, "MAVLINK_MSG_ID_SET_MODE custom mode: 0x%08X", cmd.custom_mode);
             break;
@@ -662,12 +603,16 @@ void Mavlink::on_timer_tick()
     // 스케줄러 분기 루프 시작
     switch (step) {
         case 0: { // 1. 하트비트 전송
+            // Controller::systemState_e current_state;
+            // current_state = Controller::DroneStatusManager::getInstance().getSystemStateValue(); // 시스템 상태 업데이트 (예: 시동 여부 반영)
+            
+ 
             mavlink_msg_heartbeat_pack(ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, 
                                         MAV_TYPE_QUADROTOR, 
                                         MAV_AUTOPILOT_PX4, 
                                         _heartbeat.base_mode,  
                                         _heartbeat.custom_mode, 
-                                        3);
+                                        4);//(uint8_t)_heartbeat.system_status); // 시스템 상태를 현재 드론 상태로 업데이트);
             send_mavlink_msg(&msg);
             break;
         }
@@ -795,12 +740,13 @@ void Mavlink::on_timer_tick()
 
 esp_err_t Mavlink::initialize()
 {
-    
     _heartbeat ={
-            .base_mode =    MAV_MODE_FLAG_CUSTOM_MODE_ENABLED | //MAV_MODE_FLAG_TEST_ENABLED    |    // 테스트 모드 (실제 비행에서는 사용 안 함)
-                            MAV_MODE_FLAG_STABILIZE_ENABLED  |  // 자세 제어 활성화
-                            MAV_MODE_FLAG_MANUAL_INPUT_ENABLED, // 원격제어 활성화
-            .custom_mode = 0x00070000 // PX4 STABILIZE 모드: 0x00070000 (Main Mode 7) + 0x00000000 (Sub Mode 0)
+        .base_mode =        MAV_MODE_FLAG_CUSTOM_MODE_ENABLED   |   //MAV_MODE_FLAG_TEST_ENABLED    |    // 테스트 모드 (실제 비행에서는 사용 안 함)
+                            MAV_MODE_FLAG_STABILIZE_ENABLED     |   // 자세 제어 활성화
+                            //MAV_MODE_FLAG_SAFETY_ARMED          |   // 시동(ARM) 활성화
+                            MAV_MODE_FLAG_MANUAL_INPUT_ENABLED,     // 원격제어 활성화
+        .custom_mode    =   (uint32_t)Controller::flyingMode_e::MODE_STABILIZED, // PX4 STABILIZE 모드: 0x00070000 (Main Mode 7) + 0x00000000 (Sub Mode 0)
+        .system_status  =   Controller::systemState_e::SYS_STATE_STANDBY
     };
 
     // 중요........

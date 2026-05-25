@@ -20,6 +20,7 @@
 #include "ryu_gps.hpp"
 #include "ryu_PidController.hpp"
 #include "ryu_motor.hpp"
+#include "ryu_StateManager.hpp"
 
 namespace Controller {
 
@@ -103,14 +104,7 @@ void Flight::flight_task(void *pvParameters)
     auto& pid = PidControl::getInstance();
 
 
-    // 2. [자세 게인 튜닝 파라미터 주입] 구조: {Kp, Ki, Kd, I_Limit, Out_Limit}
-    Controller::PidParams att_angle = {2.5f, 0.0f, 0.0f, 0.0f, 10.0f};  // 바깥 각도 루프
-    Controller::PidParams att_rate  = {0.08f, 0.02f, 0.001f, 0.5f, 40.0f}; // 안쪽 각속도 루프
-    pid.setAngleParams(att_angle, att_angle, att_angle);
-    pid.setRateParams(att_rate, att_rate, att_rate);
-
-
-    // 3. [고도 게인 튜닝 파라미터 독립 주입]
+    // 2. [고도 게인 튜닝 파라미터 독립 주입]
     Controller::AltitudeParams alt_config;
     alt_config.kp_alt         = 1.2f;   // 고도 -> 속도 변환율
     alt_config.kp_vel         = 1.8f;   // 속도 P
@@ -122,10 +116,10 @@ void Flight::flight_task(void *pvParameters)
     pid.setAltitudeParams(alt_config);
 
   
-    // 2. PID 파라미터 초기화 (구동 대상 하드웨어에 맞는 튜닝 파라미터 입력 필요)
+    // 2. PID 파라미터 초기화 (45cm급 소형 쿼드 기준 초기값)
     // 값 형식: {Kp, Ki, Kd, I_Limit, Output_Limit}
-    Controller::PidParams angle_gain = {2.0f, 0.1f, 0.05f, 0.5f, 10.0f}; // 바깥 루프 (목표 각속도 rad/s 한계)
-    Controller::PidParams rate_gain  = {1.0f, 0.05f, 0.001f, 1.0f, 50.0f}; // 안쪽 루프 (최종 모터 출력 한계)
+    Controller::PidParams angle_gain = {2.5f, 0.05f, 0.02f, 0.5f, 10.0f}; // 바깥 루프: 각도 오차 → 목표 각속도
+    Controller::PidParams rate_gain  = {0.12f, 0.02f, 0.001f, 1.0f, 50.0f}; // 안쪽 루프: 목표 각속도 → 모터 출력
 
     pid.setAngleParams(angle_gain, angle_gain, angle_gain); // Roll, Pitch, Yaw 동일 적용 예시
     pid.setRateParams(rate_gain, rate_gain, rate_gain);
@@ -142,10 +136,15 @@ void Flight::flight_task(void *pvParameters)
     //SensorTask의 준비되어질 시간을 기다려줌. 300이면 1~2ms가 부족하다
     vTaskDelay(pdMS_TO_TICKS(320));
 
+    int64_t prev_time = esp_timer_get_time();
     while (true) {
         // [초고속 저지연 파이프라인] Core 0의 센서 태스크가 매니저에 데이터를 쓰고 신호를 줄 때까지 대기
         // 1ms 주기로 신호가 인입되므로, 센서 차단 등 비상시 탈출을 위해 타임아웃 마진을 5ms로 설정
         uint32_t notification_value = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
+        int64_t current_time = esp_timer_get_time();
+        float dt = static_cast<float>(current_time - prev_time) * 1e-6f;
+        if (dt <= 0.0f) dt = 0.001f;
+        prev_time = current_time;
         
         if (notification_value > 0){
             esp_task_wdt_reset(); 
@@ -263,23 +262,41 @@ void Flight::flight_task(void *pvParameters)
             filtered_rate.x = alpha * cur_imu_data.gyro.x * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.x;
             filtered_rate.y = alpha * cur_imu_data.gyro.y * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.y;
             filtered_rate.z = alpha * cur_imu_data.gyro.z * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.z;
+
+            static float target_rc_throttle = 0.0f;
+            static float hold_target_altitude = 1.5f;
+            constexpr uint32_t MAV_CUSTOM_MODE_STANDBY = 0x03040000u;
+
+
+            static bool is_user_hold_mode = false;
+            Controller::flyingMode_e current_mode;
+            Controller::DroneStatusManager::getInstance().checkAndGetFlyingMode(current_mode);
+            if (current_mode == Controller::flyingMode_e::MODE_STANBY ||
+                current_mode == Controller::flyingMode_e::MODE_ALTCTL) {
+                // 홀드 모드 진입 시 현재 고도를 목표 고도로 설정하여 부드러운 전환 유도
+                is_user_hold_mode = true;
+            }else{
+                is_user_hold_mode = false;
+            }
+
             
-            static float target_rc_throttle =0.0f;
             if(sharedData.is_rc_updated()){
                 rc_data_t rc_data = sharedData.get_shared_data<Data_type::DT_RC_DATA>();
                 // RC 입력이 유효한 범위 내에 있을 때만 목표 자세에 반영 (예: -45도 ~ +45도)
                 if (std::abs(rc_data.roll) < 45.0f && std::abs(rc_data.pitch) < 45.0f && std::abs(rc_data.yaw) < 45.0f) {
-                    target_pose.roll  = rc_data.roll * DEG_TO_RAD;  // RC 입력을 라디안으로 변환하여 목표 자세에 적용
+                    target_pose.roll  = rc_data.roll * DEG_TO_RAD;  
                     target_pose.pitch = rc_data.pitch * DEG_TO_RAD;
                     target_pose.yaw   = rc_data.yaw * DEG_TO_RAD;
-                    target_rc_throttle = rc_data.throttle; // RC 스로틀 입력을 별도로 저장하여 고도 제어에 활용 가능
-
-                    // target_pose.roll         = target_pose.roll     ;  //* 0.3f;
-                    // target_pose.pitch        = target_pose.pitch    ;  //* 0.3f;
-                    // target_pose.yaw          = target_pose.yaw      ;  //* 1.5f;
-                    // target_rc_throttle       = target_rc_throttle * 10.0f;
                 }
-                // ESP_LOGI(TAG, "RC Input -> Throttle: %5.2f, Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f", rc_data.throttle, rc_data.roll, rc_data.pitch, rc_data.yaw);
+
+                target_rc_throttle = rc_data.throttle;
+                if (is_user_hold_mode) {
+                    float throttle_offset = (rc_data.throttle - 50.0f) * 0.01f;
+                    hold_target_altitude += throttle_offset * dt;
+                    hold_target_altitude = std::clamp(hold_target_altitude, 0.1f, 10.0f);
+                }
+                // ESP_LOGI(TAG, "RC Input -> Throttle: %5.2f, Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f, HoldMode: %d", 
+                //             rc_data.throttle, rc_data.roll, rc_data.pitch, rc_data.yaw, is_user_hold_mode);
             }
 
             // -------------------------------------------------------------
@@ -287,14 +304,21 @@ void Flight::flight_task(void *pvParameters)
             // -------------------------------------------------------------
             Vector3f att_outputs = pid.updateCascade(target_pose, curAttitude, filtered_rate, dt);
 
-            // 고도 제어는 RC 스로틀 입력과 독립적으로 병렬 처리하여, RC 스로틀이 0~100% 범위 내에서 고도 제어 출력에 가감산될 수 있도록 설계
-            float target_altitude  = 1.5f;               // 1.5m 고도 홀딩 명령
-            float alt_throttle_offset  = pid.updateAltitudeCascade(target_altitude, current_alt, current_vel, dt);
-            
-            alt_throttle_offset = std::clamp(alt_throttle_offset, -150.0f, 150.0f);
+            // 고도 제어는 RC 스로틀 입력과 사용자 홀드 모드 여부에 따라 다르게 처리합니다.
+            float target_altitude  = is_user_hold_mode ? hold_target_altitude : 1.5f;               // 홀드 모드 시 RC 스로틀로 목표 고도 변경, 일반 모드 시 고정 고도 보정
+            float altitude_throttle  = pid.updateAltitudeCascade(target_altitude, current_alt, current_vel, dt);
+            altitude_throttle = std::clamp(altitude_throttle, 10.0f, 85.0f);
 
-
-            float base_throttle = std::max(target_rc_throttle + alt_throttle_offset, 50.0f);
+            float base_throttle;
+            if (is_user_hold_mode) {
+                // 홀드 모드: 스로틀은 고도 유지 입력으로 사용하고, PID 출력이 베이스 스로틀이 됨
+                base_throttle = altitude_throttle;
+            } else {
+                // 일반 모드: RC 스로틀을 기본값으로 사용하고, 고도 PID 오차 보정량은 중립 hover_throttle 기준 오프셋으로 처리
+                const float hover_throttle = 43.5f;
+                float altitude_offset = altitude_throttle - hover_throttle;
+                base_throttle = std::max(target_rc_throttle + altitude_offset, 10.0f);
+            }
 
             // -------------------------------------------------------------
             // 최종 믹싱 단계: 고도 스로틀(Base)에 자세 복원력을 축별 가감산 (Quadcopter X-Type / NED 기준)
@@ -322,7 +346,16 @@ void Flight::flight_task(void *pvParameters)
             if (pwm_m4 > 2000) pwm_m4 = 2000; 
             if (pwm_m4 < 1000) pwm_m4 = 1000;
 
-            Driver::Motor::get_instance().update_compare_value(pwm_m1, pwm_m2, pwm_m3, pwm_m4);
+
+
+            static bool is_armed = false;
+            DroneStatusManager::getInstance().checkAndGetArmed(is_armed);
+            if (is_armed) {
+                Driver::Motor::get_instance().update_compare_value(pwm_m1, pwm_m2, pwm_m3, pwm_m4);
+            }else{
+                Driver::Motor::get_instance().update_compare_value(1000, 1000, 1000, 1000); // 비활성화 시 최소값으로 안전하게 유지
+                pid.reset(); // 모터가 꺼질 때 PID 적분 항 초기화로 급격한 재가동 방지
+            }
             if (++loop_cnt >= 20) { 
                 loop_cnt = 0;
                 ESP_LOGI(TAG, "Motor PWM -> M1: %4d, M2: %4d, M3: %4d, M4: %4d", pwm_m1, pwm_m2, pwm_m3, pwm_m4);

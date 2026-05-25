@@ -84,7 +84,7 @@ struct Vector3f {
     }
 };
 
-// float가 아니 다른 변수들의 활용을 위함. 
+// 2. float가 아니 다른 변수들의 활용을 위함. 
 template <typename T>
 struct Vector3{
     union {
@@ -147,7 +147,7 @@ struct Vector3{
 };
 
 
-// 2. 오일러 각도 기반 드론 자세 데이터
+// 3. 오일러 각도 기반 드론 자세 데이터
 struct Attitude_t {
     union{
         float data[3] ={0.0f,};
@@ -182,6 +182,7 @@ struct Attitude_t {
 };
 
 
+// 4. QGC에 전송할 자세 및 속도 데이터 패킷 (10Hz 동기화 캡처용)
 struct QgcAttitude_t{
     Attitude_t att;
     Vector3f   speed;
@@ -191,7 +192,7 @@ struct QgcAttitude_t{
 };
 
 
-// 3. IMU 종합 데이터 패킷 (원시 데이터 관리용)
+// 5. IMU 종합 데이터 패킷 (원시 데이터 관리용)
 struct SensorData {
     Vector3f    acc;                // 가속도 데이터 (g 또는 m/s^2)
     Vector3f    gyro;               // 자이로 데이터 (deg/s 또는 rad/s)
@@ -203,11 +204,7 @@ struct SensorData {
     bool     is_mag_updated;      // 이번 루프에 지자계 새 데이터가 들어왔는지 여부 (플래그)
 };
 
-
-/**
- * @brief 
- * 
- */
+// 6. 기압 센서 데이터 패킷 (원시 데이터 관리용)
 struct BaroData {
     uint64_t timestamp;
     float gnd_pressure;    // 기압 (hPa)
@@ -217,7 +214,7 @@ struct BaroData {
     //float climb_rate;
 };
 
-        // --- GPS 사용자 데이터 ---
+// 7. GPS 사용자 데이터 패킷 (원시 데이터 관리용)    
 struct gps_data_t {
     uint32_t    iTOW;           // gps 시간
     int         date;           // 기본 날자
@@ -244,13 +241,13 @@ struct gps_data_t {
 };
 
 
-// RC 데이터가 어디서 들어오는지에 따라 RC 데이터 타입을 구분하기 위한 열거형과 구조체 정의
+// 8. RC 데이터가 어디서 들어오는지에 따라 RC 데이터 타입을 구분하기 위한 열거형과 구조체 정의
 enum RemoteControlType{
     RC_FLYSKY,
     RC_QGC
 };
 
-// 4. RC 조종 데이터 패킷
+// 9. RC 조종 데이터 패킷
 struct rc_data_t {
     float throttle;  // 스로틀 (0~100%)
     float roll;      // 롤 (-100~100)
@@ -262,3 +259,4 @@ struct rc_data_t {
     float aux4;      // 보조 채널 4
     RemoteControlType type;
 };
+
