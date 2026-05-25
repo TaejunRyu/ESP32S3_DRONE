@@ -140,6 +140,7 @@ void Flight::flight_task(void *pvParameters)
     while (true) {
         // [초고속 저지연 파이프라인] Core 0의 센서 태스크가 매니저에 데이터를 쓰고 신호를 줄 때까지 대기
         // 1ms 주기로 신호가 인입되므로, 센서 차단 등 비상시 탈출을 위해 타임아웃 마진을 5ms로 설정
+
         uint32_t notification_value = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
         int64_t current_time = esp_timer_get_time();
         float dt = static_cast<float>(current_time - prev_time) * 1e-6f;
@@ -210,23 +211,21 @@ void Flight::flight_task(void *pvParameters)
             float q3 = q_buffer[3];
 
 
-            Vector3f acc;
+            Vector3f acc{};
             // 센서 원시 데이터(m/s^2)를 9.81로 나누어 단위를 G 규격(정지 시 1.0)으로 가공
-            acc.x = cur_imu_data.acc.x / 9.80665f;
-            acc.y = cur_imu_data.acc.y / 9.80665f;
-            acc.z = cur_imu_data.acc.z / 9.80665f;
+            acc   = cur_imu_data.acc / 9.80665f; 
 
             // 3. 취득한 기존 EKF 쿼터니언을 이용하여 체프 가속도를 지구 수직 방향(Z축 Down)으로 회전 투영
             float acc_z_earth = 2.0f * (q1*q3 - q0*q2) * acc.x + 
                                 2.0f * (q0*q1 + q2*q3) * acc.y + 
                                 (q0*q0 - q1*q1 - q2*q2 + q3*q3) * acc.z;
 
-            // 4. 중력 성분(1.0G 또는 9.81m/s^2)을 차감하여 순수 운동 상승/하강 가속도만 분리
-            // (가만히 수평 호버링 중일 때는 이 값이 정확히 0.0f 에 가깝게 홀딩되어야 성공입니다.)
-            float pure_vertical_accel = acc_z_earth - 1.0f; ; // 가속도 단위 규격이 G(Gravity)인 경우
+            // 4. 중력 성분을 제거한 순수 수직 가속도를 m/s^2 단위로 변환하여 필터 예측 단계에 공급
+            // (호버링 중에는 0.0f 근처에 머물러야 합니다.)
+            float pure_vertical_accel = (acc_z_earth - 1.0f) * 9.80665f;
 
             // 5. 1ms 주기로 수직 칼만필터 시간 예측 단계 실행
-            v_kalman.predict(pure_vertical_accel, dt);            
+            v_kalman.predict(pure_vertical_accel, dt);
 
             //[목표 고도] ➔ Outer Loop (고도 P 제어) ➔ [목표 상승/하강 속도] ➔ Inner Loop (속도 PID) ➔ [최종 Throttle]
             BaroData baroData{};
@@ -256,16 +255,36 @@ void Flight::flight_task(void *pvParameters)
             //     ESP_LOGI(TAG, "Altitude -> est_alt: %5.2f, est_vel: %5.2f", current_alt,current_vel);
             // }
 
-            // 자이로 데이터는 진동이 발생할경우( 필터 제공 )
+            static float target_rc_throttle = 0.0f;
+            rc_data_t rc_data;
+            if(sharedData.is_rc_updated()){
+                rc_data = sharedData.get_shared_data<Data_type::DT_RC_DATA>();
+                // RC 입력이 유효한 범위 내에 있을 때만 목표 자세에 반영 (예: -45도 ~ +45도)
+                if (std::abs(rc_data.roll) < 45.0f && std::abs(rc_data.pitch) < 45.0f && std::abs(rc_data.yaw) < 45.0f) {
+                    target_pose.roll  = rc_data.roll * DEG_TO_RAD;  
+                    target_pose.pitch = rc_data.pitch * DEG_TO_RAD;
+                    target_pose.yaw   = rc_data.yaw * DEG_TO_RAD;
+                }
+                target_rc_throttle = rc_data.throttle;
+                // ESP_LOGI(TAG, "RC Input -> Throttle: %5.2f, Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f, HoldMode: %d", 
+                //             rc_data.throttle, rc_data.roll, rc_data.pitch, rc_data.yaw, is_user_hold_mode);
+            }
+
+            // 8. 자이로 데이터에 간단한 저역 통과 필터 적용 (노이즈 완화)
             static Vector3f filtered_rate = {0.0f, 0.0f, 0.0f};
             const float alpha = 0.3f; 
             filtered_rate.x = alpha * cur_imu_data.gyro.x * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.x;
             filtered_rate.y = alpha * cur_imu_data.gyro.y * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.y;
             filtered_rate.z = alpha * cur_imu_data.gyro.z * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.z;
 
-            static float target_rc_throttle = 0.0f;
+            
+            //-----------------------------------------------------------------------------------------------------
+            // 여기까지 모든 데이터는 준비되었음 (센서,RC,GPS,필터링......)
+            // 이제부터는 제어 연산과 모터 믹싱에만 집중하여 최적화된 연산 파이프라인으로 처리합니다.
+            //-----------------------------------------------------------------------------------------------------
+            
+            // [고도 홀드 모드] RC 스로틀을 고도 목표로 활용하는 사용자 홀드 모드 처리
             static float hold_target_altitude = 1.5f;
-
             static bool is_user_hold_mode = false;
             Controller::flyingMode_e current_mode;
             Controller::DroneStatusManager::getInstance().checkAndGetFlyingMode(current_mode);
@@ -273,82 +292,54 @@ void Flight::flight_task(void *pvParameters)
                 current_mode == Controller::flyingMode_e::MODE_ALTCTL) {
                 // 홀드 모드 진입 시 현재 고도를 목표 고도로 설정하여 부드러운 전환 유도
                 hold_target_altitude = current_alt;
+                float throttle_offset = (rc_data.throttle - 50.0f) * 0.01f;
+                hold_target_altitude += throttle_offset * dt;
+                hold_target_altitude = std::clamp(hold_target_altitude, 0.1f, 10.0f);
                 is_user_hold_mode = true;
+
             }else{
                 is_user_hold_mode = false;
             }
 
-            
-            if(sharedData.is_rc_updated()){
-                rc_data_t rc_data = sharedData.get_shared_data<Data_type::DT_RC_DATA>();
-                // RC 입력이 유효한 범위 내에 있을 때만 목표 자세에 반영 (예: -45도 ~ +45도)
-                if (std::abs(rc_data.roll) < 45.0f && std::abs(rc_data.pitch) < 45.0f && std::abs(rc_data.yaw) < 45.0f) {
-                    target_pose.roll  = rc_data.roll * DEG_TO_RAD;  
-                    target_pose.pitch = rc_data.pitch * DEG_TO_RAD;
-                    target_pose.yaw   = rc_data.yaw * DEG_TO_RAD;
-                }
-
-                target_rc_throttle = rc_data.throttle;
-                if (is_user_hold_mode) {
-                    float throttle_offset = (rc_data.throttle - 50.0f) * 0.01f;
-                    hold_target_altitude += throttle_offset * dt;
-                    hold_target_altitude = std::clamp(hold_target_altitude, 0.1f, 10.0f);
-                }
-                // ESP_LOGI(TAG, "RC Input -> Throttle: %5.2f, Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f, HoldMode: %d", 
-                //             rc_data.throttle, rc_data.roll, rc_data.pitch, rc_data.yaw, is_user_hold_mode);
+            // -------------------------------------------------------------
+            // 핵심 연산: 고도 제어 명령을 홀드 모드에서만 활성화하고,
+            // 일반 모드에서는 RC 스로틀을 그대로 베이스 출력으로 사용합니다.
+            // -------------------------------------------------------------
+            const float hover_throttle = 43.5f;
+            float altitude_throttle = hover_throttle;
+            if (is_user_hold_mode) {
+                altitude_throttle = pid.updateAltitudeCascade(hold_target_altitude, current_alt, current_vel, dt);
             }
-
-            // -------------------------------------------------------------
-            // 핵심 연산: 자세와 고도 제어 명령을 병렬 독립 연산 처리
-            // -------------------------------------------------------------
-            Vector3f att_outputs = pid.updateCascade(target_pose, curAttitude, filtered_rate, dt);
-
-            // 고도 제어는 RC 스로틀 입력과 사용자 홀드 모드 여부에 따라 다르게 처리합니다.
-            // 홀드 모드 시 RC 스로틀로 목표 고도 변경, 일반 모드 시 고정 고도 보정
-            float target_altitude  = is_user_hold_mode ? hold_target_altitude : 1.5f;               
-            float altitude_throttle  = pid.updateAltitudeCascade(target_altitude, current_alt, current_vel, dt);
             altitude_throttle = std::clamp(altitude_throttle, 10.0f, 85.0f);
 
-            float base_throttle;
-            if (is_user_hold_mode) {
-                // 홀드 모드: 스로틀은 고도 유지 입력으로 사용하고, PID 출력이 베이스 스로틀이 됨
-                base_throttle = altitude_throttle;
-            } else {
-                // 일반 모드: RC 스로틀을 기본값으로 사용하고, 고도 PID 오차 보정량은 중립 hover_throttle 기준 오프셋으로 처리
-                const float hover_throttle = 43.5f;
-                float altitude_offset = altitude_throttle - hover_throttle;
-                base_throttle = std::max(target_rc_throttle + altitude_offset, 10.0f);
-            }
-
             // -------------------------------------------------------------
-            // 최종 믹싱 단계: 고도 스로틀(Base)에 자세 복원력을 축별 가감산 (Quadcopter X-Type / NED 기준)
+            // 핵심 연산: 자세 제어 명령을 병렬 독립 연산 처리
             // -------------------------------------------------------------
-            float m1_fr = base_throttle - att_outputs.x - att_outputs.y - att_outputs.z; // 전방 우측
-            float m2_bl = base_throttle + att_outputs.x + att_outputs.y - att_outputs.z; // 후방 좌측
-            float m3_fl = base_throttle + att_outputs.x - att_outputs.y + att_outputs.z; // 전방 좌측
-            float m4_br = base_throttle - att_outputs.x + att_outputs.y + att_outputs.z; // 후방 우측
-
+            Vector3f att_outputs = pid.updateCascade(target_pose, curAttitude, filtered_rate, dt);
+            float base_throttle{};
+            if(is_user_hold_mode)   base_throttle = altitude_throttle;
+            else                    base_throttle = std::clamp(target_rc_throttle, 10.0f, 85.0f);
             
-            // [선택지 2] 만약 일반 표준 PWM 변속기(ESC)를 사용하시는 경우 (출력 범위: 1000us ~ 2000us)
-            uint32_t pwm_m1 = (uint32_t)(1000.0f + (m1_fr / 100.0f) * 1000.0f);
-            uint32_t pwm_m2 = (uint32_t)(1000.0f + (m2_bl / 100.0f) * 1000.0f);
-            uint32_t pwm_m3 = (uint32_t)(1000.0f + (m3_fl / 100.0f) * 1000.0f);
-            uint32_t pwm_m4 = (uint32_t)(1000.0f + (m4_br / 100.0f) * 1000.0f);
 
+            // -------------------------------------------------------------
+            // 최종 믹싱 단계: 베이스 스로틀에 자세 복원력을 축별 가감산
+            // -------------------------------------------------------------
+            float m1_fr = std::clamp(base_throttle - att_outputs.x - att_outputs.y - att_outputs.z, 0.0f, 100.0f);
+            float m2_bl = std::clamp(base_throttle + att_outputs.x + att_outputs.y - att_outputs.z, 0.0f, 100.0f);
+            float m3_fl = std::clamp(base_throttle + att_outputs.x - att_outputs.y + att_outputs.z, 0.0f, 100.0f);
+            float m4_br = std::clamp(base_throttle - att_outputs.x + att_outputs.y + att_outputs.z, 0.0f, 100.0f);
 
-            // 안전 가이드 한계값 구속 (1000us 미만이나 2000us 초과 방어)
-            if (pwm_m1 > 2000) pwm_m1 = 2000; 
-            if (pwm_m1 < 1000) pwm_m1 = 1000;
-            if (pwm_m2 > 2000) pwm_m2 = 2000; 
-            if (pwm_m2 < 1000) pwm_m2 = 1000;
-            if (pwm_m3 > 2000) pwm_m3 = 2000; 
-            if (pwm_m3 < 1000) pwm_m3 = 1000;
-            if (pwm_m4 > 2000) pwm_m4 = 2000; 
-            if (pwm_m4 < 1000) pwm_m4 = 1000;
+            auto to_pwm = [](float throttle_pct) -> uint32_t {
+                const float clamped_pct = std::clamp(throttle_pct, 0.0f, 100.0f);
+                return static_cast<uint32_t>(1000.0f + (clamped_pct / 100.0f) * 1000.0f);
+            };
 
+            uint32_t pwm_m1 = to_pwm(m1_fr);
+            uint32_t pwm_m2 = to_pwm(m2_bl);
+            uint32_t pwm_m3 = to_pwm(m3_fl);
+            uint32_t pwm_m4 = to_pwm(m4_br);
 
-
-            static bool is_armed = false;
+            static bool is_armed{};
             DroneStatusManager::getInstance().checkAndGetArmed(is_armed);
             if (is_armed) {
                 Driver::Motor::get_instance().update_compare_value(pwm_m1, pwm_m2, pwm_m3, pwm_m4);
