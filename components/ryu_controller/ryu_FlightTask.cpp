@@ -211,7 +211,7 @@ void Flight::flight_task(void *pvParameters)
 
 
             Vector3f acc;
-            // 💡 센서 원시 데이터(m/s^2)를 9.81로 나누어 단위를 G 규격(정지 시 1.0)으로 가공
+            // 센서 원시 데이터(m/s^2)를 9.81로 나누어 단위를 G 규격(정지 시 1.0)으로 가공
             acc.x = cur_imu_data.acc.x / 9.80665f;
             acc.y = cur_imu_data.acc.y / 9.80665f;
             acc.z = cur_imu_data.acc.z / 9.80665f;
@@ -265,8 +265,6 @@ void Flight::flight_task(void *pvParameters)
 
             static float target_rc_throttle = 0.0f;
             static float hold_target_altitude = 1.5f;
-            constexpr uint32_t MAV_CUSTOM_MODE_STANDBY = 0x03040000u;
-
 
             static bool is_user_hold_mode = false;
             Controller::flyingMode_e current_mode;
@@ -305,7 +303,8 @@ void Flight::flight_task(void *pvParameters)
             Vector3f att_outputs = pid.updateCascade(target_pose, curAttitude, filtered_rate, dt);
 
             // 고도 제어는 RC 스로틀 입력과 사용자 홀드 모드 여부에 따라 다르게 처리합니다.
-            float target_altitude  = is_user_hold_mode ? hold_target_altitude : 1.5f;               // 홀드 모드 시 RC 스로틀로 목표 고도 변경, 일반 모드 시 고정 고도 보정
+            // 홀드 모드 시 RC 스로틀로 목표 고도 변경, 일반 모드 시 고정 고도 보정
+            float target_altitude  = is_user_hold_mode ? hold_target_altitude : 1.5f;               
             float altitude_throttle  = pid.updateAltitudeCascade(target_altitude, current_alt, current_vel, dt);
             altitude_throttle = std::clamp(altitude_throttle, 10.0f, 85.0f);
 
@@ -356,10 +355,11 @@ void Flight::flight_task(void *pvParameters)
                 Driver::Motor::get_instance().update_compare_value(1000, 1000, 1000, 1000); // 비활성화 시 최소값으로 안전하게 유지
                 pid.reset(); // 모터가 꺼질 때 PID 적분 항 초기화로 급격한 재가동 방지
             }
-            if (++loop_cnt >= 20) { 
-                loop_cnt = 0;
-                ESP_LOGI(TAG, "Motor PWM -> M1: %4d, M2: %4d, M3: %4d, M4: %4d", pwm_m1, pwm_m2, pwm_m3, pwm_m4);
-            }
+            
+            // if (++loop_cnt >= 20) { 
+            //     loop_cnt = 0;
+            //     ESP_LOGI(TAG, "Motor PWM -> M1: %4d, M2: %4d, M3: %4d, M4: %4d", pwm_m1, pwm_m2, pwm_m3, pwm_m4);
+            // }
             
             // -------------------------------------------------------------
             // [확장 마감] 자세 및 수직 상태 데이터 QGC 게시 연동 (10Hz)
