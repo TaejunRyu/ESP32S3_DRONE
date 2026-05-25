@@ -272,6 +272,7 @@ void Flight::flight_task(void *pvParameters)
             if (current_mode == Controller::flyingMode_e::MODE_STANBY ||
                 current_mode == Controller::flyingMode_e::MODE_ALTCTL) {
                 // 홀드 모드 진입 시 현재 고도를 목표 고도로 설정하여 부드러운 전환 유도
+                hold_target_altitude = current_alt;
                 is_user_hold_mode = true;
             }else{
                 is_user_hold_mode = false;
