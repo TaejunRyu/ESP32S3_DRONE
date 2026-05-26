@@ -41,7 +41,7 @@ esp_err_t IST8310::initialize()
     // 3. 센서 내부 동작 환경 설정 (이 루틴이 없으면 데이터 갱신 안됨)
     // AVGCNTL(0x41): 0x24 (X,Y,Z 모두 16회 평균으로 노이즈 제거)
     //uint8_t avg_data[] = {AVGCNTL, 0x24};
-    err = _ibus->Write(AVGCNTL, 0x24);
+    err = _ibus->Write(AVGCNTL, 0x09);
     if (err != ESP_OK){
         return err;
     }
@@ -74,7 +74,7 @@ esp_err_t IST8310::initialize()
     vTaskDelay(pdMS_TO_TICKS(50));
 
     // 4. 모드 설정: 100Hz 연속 측정 모드 (CNTL1)
-    // 0x08 = 100Hz Continuous Mode
+    // 0x0B = 100Hz Continuous Mode
     //uint8_t mode_cmd_continuous[] = {CONTROL1, 0x0B};
     err = _ibus->Write(CONTROL1, 0x0B);
     if (err != ESP_OK){

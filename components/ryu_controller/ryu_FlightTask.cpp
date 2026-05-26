@@ -132,7 +132,7 @@ void Flight::flight_task(void *pvParameters)
     uint32_t loop_cnt = 0;        
     SensorData cur_imu_data {};
     Vector3f   cur_mag_data {};
-    ESP_LOGI(TAG, "Flight 제어 태스크가 Core 1에서 완벽한 데이터 동기화 모드로 가동되었습니다.");
+    
     //SensorTask의 준비되어질 시간을 기다려줌. 300이면 1~2ms가 부족하다
     vTaskDelay(pdMS_TO_TICKS(320));
 
@@ -142,6 +142,7 @@ void Flight::flight_task(void *pvParameters)
         // 1ms 주기로 신호가 인입되므로, 센서 차단 등 비상시 탈출을 위해 타임아웃 마진을 5ms로 설정
 
         uint32_t notification_value = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
+
         int64_t current_time = esp_timer_get_time();
         float dt = static_cast<float>(current_time - prev_time) * 1e-6f;
         if (dt <= 0.0f) dt = 0.001f;
@@ -170,6 +171,8 @@ void Flight::flight_task(void *pvParameters)
                     cur_imu_data.mag.normalize();        
                 }
             }
+
+            // 내부에서 mag데이터가 있는지 판단하여 처리한다.
             // [EKF 핵심 엔진 가동] 자이로 예측 후 가속도/지자계 순차 보정 처리
             kalman.update(  cur_imu_data.acc,
                             cur_imu_data.gyro * DEG_TO_RAD, //// 입력 데이터 가공 (입력이 도/초 단위일 경우 예측부 라디안 스케일링 일치 처리)
@@ -193,23 +196,20 @@ void Flight::flight_task(void *pvParameters)
             }
                         
             // 3. 자북 방위각에 '단 한 번만' 편각을 더하여 진북 방위각 생성 (누적 방지)
-            curAttitude.yaw = curAttitude.yaw - target_true_north;
+            curAttitude.yaw = curAttitude.yaw + target_true_north;
 
             // 4. NED 좌표계 표준 경계선 처리 (-PI ~ +PI) 필수 수행
             while (curAttitude.yaw > M_PI)  curAttitude.yaw -= 2.0f * M_PI;
             while (curAttitude.yaw < -M_PI) curAttitude.yaw += 2.0f * M_PI;
-
-
-            float q_buffer[4] = {1.0f, 0.0f, 0.0f, 0.0f};
             
             // 1. [핵심] 기존 자세 EKF로부터 실시간 최신 쿼터니언 상태 변수 취득
             // (이 값이 실시간 기체의 롤, 피치 기울임 정보를 온전히 담고 있습니다.)
+            float q_buffer[4] = {1.0f, 0.0f, 0.0f, 0.0f};
             kalman.getQuaternion(q_buffer);
-            float q0 = q_buffer[0]; 
-            float q1 = q_buffer[1]; 
-            float q2 = q_buffer[2]; 
-            float q3 = q_buffer[3];
-
+            float q0 = q_buffer[0];     // scalar part (실수부)
+            float q1 = q_buffer[1];     // X축 회전 관여 
+            float q2 = q_buffer[2];     // Y축 회전 관여
+            float q3 = q_buffer[3];     // Z축 회전 관여
 
             Vector3f acc{};
             // 센서 원시 데이터(m/s^2)를 9.81로 나누어 단위를 G 규격(정지 시 1.0)으로 가공
@@ -250,10 +250,10 @@ void Flight::flight_task(void *pvParameters)
             float current_alt = v_kalman.getAltitude();
             float current_vel = v_kalman.getVelocity();
 
-            // if (++loop_cnt >= 20) { 
-            //     loop_cnt = 0;
-            //     ESP_LOGI(TAG, "Altitude -> est_alt: %5.2f, est_vel: %5.2f", current_alt,current_vel);
-            // }
+            if (++loop_cnt >= 20) { 
+                loop_cnt = 0;
+                ESP_LOGI(TAG, "Altitude -> est_alt: %5.2f, est_vel: %5.2f", current_alt,current_vel);
+            }
 
             static float target_rc_throttle = 0.0f;
             rc_data_t rc_data;
@@ -277,7 +277,6 @@ void Flight::flight_task(void *pvParameters)
             filtered_rate.y = alpha * cur_imu_data.gyro.y * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.y;
             filtered_rate.z = alpha * cur_imu_data.gyro.z * DEG_TO_RAD + (1.0f - alpha) * filtered_rate.z;
 
-            
             //-----------------------------------------------------------------------------------------------------
             // 여기까지 모든 데이터는 준비되었음 (센서,RC,GPS,필터링......)
             // 이제부터는 제어 연산과 모터 믹싱에만 집중하여 최적화된 연산 파이프라인으로 처리합니다.
@@ -296,7 +295,6 @@ void Flight::flight_task(void *pvParameters)
                 hold_target_altitude += throttle_offset * dt;
                 hold_target_altitude = std::clamp(hold_target_altitude, 0.1f, 10.0f);
                 is_user_hold_mode = true;
-
             }else{
                 is_user_hold_mode = false;
             }
@@ -305,13 +303,15 @@ void Flight::flight_task(void *pvParameters)
             // 핵심 연산: 고도 제어 명령을 홀드 모드에서만 활성화하고,
             // 일반 모드에서는 RC 스로틀을 그대로 베이스 출력으로 사용합니다.
             // -------------------------------------------------------------
-            const float hover_throttle = 43.5f;
-            float altitude_throttle = hover_throttle;
+            float altitude_throttle{};
             if (is_user_hold_mode) {
                 altitude_throttle = pid.updateAltitudeCascade(hold_target_altitude, current_alt, current_vel, dt);
+                altitude_throttle = std::clamp(altitude_throttle, 10.0f, 85.0f);
+                // if (++loop_cnt >= 20) { 
+                //     loop_cnt = 0;
+                //     ESP_LOGI(TAG, "Hold Mode -> Target Alt: %5.2f, Hold Throttle: %5.2f", hold_target_altitude, altitude_throttle);
+                // }
             }
-            altitude_throttle = std::clamp(altitude_throttle, 10.0f, 85.0f);
-
             // -------------------------------------------------------------
             // 핵심 연산: 자세 제어 명령을 병렬 독립 연산 처리
             // -------------------------------------------------------------

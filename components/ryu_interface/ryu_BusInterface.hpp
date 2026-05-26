@@ -78,7 +78,7 @@ inline IBus* createBIF(i2c_master_bus_handle_t bus_handle, uint16_t addr) {
     dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
     dev_cfg.device_address = addr;
     dev_cfg.scl_speed_hz = 400'000;
-
+    
     if (i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev_h) == ESP_OK) {
         return new I2CBus(dev_h);
     }

@@ -31,88 +31,84 @@ esp_err_t BaroSensorTask::initialize()
 
 
 void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
-
-    auto& bmp388    = Sensor::BMP388::getInstance();
+    auto& bmp388 = Sensor::BMP388::getInstance();
 
     bool cal_gndPressure = false;
     float sumPressure{0};
     uint16_t sumCount{0};
-    float currentAlt{};
-    float currentFilteredAlt{};
-    float lastFilteredAlt{};  // 확정된 고도.
-    float altOffset{};       
+    
+    float currentAlt{0.0f};
+    float rawFilteredAlt{0.0f};   // [수정] 오프셋 적용 전, 필터링만 거친 절대 고도
+    float currentFilteredAlt{0.0f};
+    float altOffset{0.0f};       
     bool isFirstAltCalculated = false; 
 
-    float previousPressure{};
-    float gnd_pressure{};   // 날리기전 지면의 기압.
-    float pressure{};       // 현재 기압.
+    float gnd_pressure{0.0f};   
+    float pressure{0.0f};       
     BaroData baro_buf {};
 
-
     size_t communication_fail_count = 0;
-
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(40); 
 
     while (true) {
-        if (bmp388.is_data_ready()){
-            esp_err_t err = bmp388.get_pressure(&pressure);
-            if(err == ESP_OK){
-                communication_fail_count = 0; // 통신 성공 시 무조건 최상단에서 실패 카운트 리셋!
-                // if (pressure < 900){
-                //     pressure = previousPressure;
-                // }
-                // previousPressure = pressure;
+        vTaskDelayUntil(&xLastWakeTime, xFrequency); // 정주기 보장
 
-                // 1. 시동 시 현재 위치의 기압 수집 (평균 산출)
-                if (!cal_gndPressure){
-                    sumPressure += pressure;
-                    ++sumCount;
-                    if(sumCount >= 100){ 
-                        gnd_pressure = sumPressure / (float)sumCount;
-                        cal_gndPressure = true;       
-                        ESP_LOGI(TAG, "Ground Pressure Calibration Success! Base: %.3f hPa", gnd_pressure);
-                    }
-                } 
+        esp_err_t err = bmp388.get_pressure(&pressure);
+        if (err == ESP_OK) {
+            communication_fail_count = 0;
 
-                // 2. 그라운드 기압 기준 상대 고도 및 속도 변화율 연산
-                if(cal_gndPressure){
-                    currentAlt = 44330.0f * (1.0f - powf(pressure / gnd_pressure, 0.190295f));
-                    float currentFiltered = (currentAlt * 0.2f) + (lastFilteredAlt * 0.8f);
-                    
-                    if (!isFirstAltCalculated) { // gnd_pressue으로 고도를 계산한것이 offet이되어짐.
-                        altOffset = currentFiltered;
-                        isFirstAltCalculated = true;
-                    }                 
-                    // 오프셋이 반영된 완전무결한 순수 상대 고도 확정
-                    currentFilteredAlt = currentFiltered - altOffset;
-                    // 1차적으로 기압계 기반 고도 동기화
-                    lastFilteredAlt = currentFilteredAlt;                    
+            // 1. 초기 100샘플(약 4초) 동안 지면 기압 평균 산출
+            if (!cal_gndPressure) {
+                sumPressure += pressure;
+                ++sumCount;
+                if (sumCount >= 100) { 
+                    gnd_pressure = sumPressure / static_cast<float>(sumCount);
+                    cal_gndPressure = true;       
+                    ESP_LOGI(TAG, "Ground Pressure Calibration Success! Base: %.3f hPa", gnd_pressure);
+                }
+            } 
+
+            // 2. 지면 기압 확정 후 고도 연산
+            if (cal_gndPressure) {
+                // 표준 대기압 공식 기반 절대 고도 계산
+                currentAlt = 44330.0f * (1.0f - powf(pressure / gnd_pressure, 0.190295f));
+                
+                // [수정] 오프셋이 반영되지 않은 순수 기압 고도 상태에서 LPF(Low Pass Filter) 적용
+                if (!isFirstAltCalculated) {
+                    rawFilteredAlt = currentAlt; // 최초 실행 시 필터 초기값 지정
+                    altOffset = currentAlt;      // 최초 고도를 오프셋(기준점)으로 저장
+                    isFirstAltCalculated = true;
                 } else {
-                    currentFilteredAlt = 0.0f;
-                    lastFilteredAlt = 0.0f;
+                    // 40ms 주기 기준의 컷오프 필터 연산
+                    rawFilteredAlt = (currentAlt * 0.2f) + (rawFilteredAlt * 0.8f);
                 }
                 
-                // 4. 최종 정렬된 데이터를 갱신 발행
-                baro_buf.gnd_pressure   = gnd_pressure;
-                baro_buf.pressure       = pressure;
-                baro_buf.altitude       = currentFilteredAlt; // 제어 루프에 공급되는 완벽한 융합 고도
-                baro_buf.timestamp      = esp_timer_get_time();
-                
-                SharedDataManager::getInstance().publish_data<Data_type::DT_BARO_DATA>(baro_buf);
-                SharedDataManager::getInstance().set_baro_updated(true);
-            }else{
-                communication_fail_count++;
-                ESP_LOGW(TAG, "센서 통신 일시 실패 (%d회 연속)", communication_fail_count);
+                // [수정] 필터링이 완료된 절대 고도에서 오프셋을 차감하여 완전한 '상대 고도' 확정
+                currentFilteredAlt = rawFilteredAlt - altOffset;
+                                    
+            } else {
+                currentFilteredAlt = 0.0f;
+            }
+            
+            // 4. 최종 데이터 발행
+            baro_buf.gnd_pressure   = gnd_pressure;
+            baro_buf.pressure       = pressure;
+            baro_buf.altitude       = currentFilteredAlt; 
+            baro_buf.timestamp      = esp_timer_get_time();
+            
+            SharedDataManager::getInstance().publish_data<Data_type::DT_BARO_DATA>(baro_buf);
+            SharedDataManager::getInstance().set_baro_updated(true);
 
-                // [Fail-Safe 방어 대책] 10ms 연속 먹통 시 즉각적인 비상 대책 수립
-                if (communication_fail_count >= 10) {
-                    ESP_LOGE(TAG, "치명적 오류: Baro 연결 유실! 긴급 비상 모드 진입 필요.");
-                    // task->_data_manager->trigger_emergency_stop();
-                }
+        } else {
+            communication_fail_count++;
+            ESP_LOGW(TAG, "센서 통신 일시 실패 (%d회 연속)", communication_fail_count);
+
+            if (communication_fail_count >= 10) {
+                ESP_LOGE(TAG, "치명적 오류: Baro 연결 유실! 긴급 비상 모드 진입 필요.");
+                // SharedDataManager::getInstance().trigger_emergency_stop();
             }
         }
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
 
