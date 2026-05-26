@@ -20,6 +20,9 @@ void app_main(void){
     led_strip.initialize();
     led_strip.init_sequence();
 
+
+
+
     //-----------WIFI 초기화----------
     // NVS 초기화
     esp_err_t err = nvs_flash_init();

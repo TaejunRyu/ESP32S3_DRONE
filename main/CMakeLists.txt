@@ -8,5 +8,6 @@ idf_component_register(
         esp_event
         nvs_flash
         ryu_controller
+        ryu_filter
 
 )

@@ -21,6 +21,7 @@
 #include "ryu_PidController.hpp"
 #include "ryu_motor.hpp"
 #include "ryu_StateManager.hpp"
+#include "ryu_EspEkf.hpp"
 
 namespace Controller {
 
@@ -89,7 +90,21 @@ esp_err_t Flight::deinitialize(){
 
 void Flight::flight_task(void *pvParameters)
 {
-    esp_task_wdt_add(nullptr);
+
+    // esp_task_wdt_config_t wdt_config = {
+    //     .timeout_ms = 10000,                            // 💡 원하는 시간 입력 (예: 10000ms = 10초)
+    //     .idle_core_mask = (1 << CONFIG_FREERTOS_NUMBER_OF_CORES) - 1, // 모든 CPU 코어 감시
+    //     .trigger_panic = true                           // 타임아웃 시 핵심 덤프 후 리셋
+    // };
+
+    // // 현재 구동 중인 워치독 타이머의 설정을 10초로 재구성합니다.
+    // esp_err_t err = esp_task_wdt_reconfigure(&wdt_config);
+    // if (err == ESP_OK) {
+    //     ESP_LOGI("WDT", "태스크 워치독 시간이 성공적으로 늘어났습니다.");
+    // }
+
+
+    // esp_task_wdt_add(nullptr);
     //Flight* flight = static_cast<Flight*>(pvParameters);
 
     // 1. 중계자 데이터 매니저 가져오기
@@ -99,9 +114,15 @@ void Flight::flight_task(void *pvParameters)
     auto& kalman = Filter::KalmanFilter::getInstance();
     kalman.init(0.0f, 0.0f, 0.0f);
     
+    //auto& kalman = Filter::Userekf::getInstance();
+    //kalman.initialize();
+
+
     auto& v_kalman = Filter::VerticalFilter::getInstance();
 
     auto& pid = PidControl::getInstance();
+
+    
 
 
     // 2. [고도 게인 튜닝 파라미터 독립 주입]
@@ -129,29 +150,28 @@ void Flight::flight_task(void *pvParameters)
     // 가상 목표 및 센서 데이터 선언
     Attitude_t target_pose = {0.0f, 0.0f, 0.0f}; // 정밀 호버링 (평평한 상태) 목표
 
-    uint32_t loop_cnt = 0;        
-    SensorData cur_imu_data {};
-    Vector3f   cur_mag_data {};
+    uint32_t    loop_cnt = 0;        
+    //uint32_t    kalman_update_cnt = 0;
+    SensorData  cur_imu_data {};
+    Vector3f    cur_mag_data {};
     
     //SensorTask의 준비되어질 시간을 기다려줌. 300이면 1~2ms가 부족하다
     vTaskDelay(pdMS_TO_TICKS(320));
+    
+    // 디버그용 GPIO 핀 설정 (예: LED 토글로 루프 주기 측정)
+    #define DEBUG_GPIO_PIN  GPIO_NUM_17 // 남는 GPIO 핀 지정
+    gpio_config_t io_conf = {};
+    io_conf.pin_bit_mask = (1ULL << DEBUG_GPIO_PIN);
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    gpio_config(&io_conf);
 
-    int64_t prev_time = esp_timer_get_time();
     while (true) {
-        // [초고속 저지연 파이프라인] Core 0의 센서 태스크가 매니저에 데이터를 쓰고 신호를 줄 때까지 대기
-        // 1ms 주기로 신호가 인입되므로, 센서 차단 등 비상시 탈출을 위해 타임아웃 마진을 5ms로 설정
 
-        uint32_t notification_value = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
-
-        int64_t current_time = esp_timer_get_time();
-        float dt = static_cast<float>(current_time - prev_time) * 1e-6f;
-        if (dt <= 0.0f) dt = 0.001f;
-        prev_time = current_time;
-        
-        if (notification_value > 0){
-            //watch dog에 밥주자~~~~
-            esp_task_wdt_reset(); 
-
+        if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5)) > 0){
+             gpio_set_level(DEBUG_GPIO_PIN, 1); // 📈 루프 시작: 핀을 High로!
+           
             // 센서 캘리브레이션(0점 조절)이 완료될 때까지는 필터 연산을 유보하고 대기
             if (!sharedData.is_imu_calibrated()) {
                 vTaskDelay(pdMS_TO_TICKS(1)); 
@@ -173,15 +193,26 @@ void Flight::flight_task(void *pvParameters)
                 }
             }
 
-            // 내부에서 mag데이터가 있는지 판단하여 처리한다.
-            // [EKF 핵심 엔진 가동] 자이로 예측 후 가속도/지자계 순차 보정 처리
-            kalman.update(  cur_imu_data.acc,
-                            cur_imu_data.gyro * DEG_TO_RAD, //// 입력 데이터 가공 (입력이 도/초 단위일 경우 예측부 라디안 스케일링 일치 처리)
-                            cur_imu_data.mag,
-                            dt);
-            
+            //if (++kalman_update_cnt >= 10) {
+                // 내부에서 mag데이터가 있는지 판단하여 처리한다.
+                // [EKF 핵심 엔진 가동] 자이로 예측 후 가속도/지자계 순차 보정 처리
+                kalman.update(  cur_imu_data.acc,
+                                cur_imu_data.gyro * DEG_TO_RAD, //// 입력 데이터 가공 (입력이 도/초 단위일 경우 예측부 라디안 스케일링 일치 처리)
+                                cur_imu_data.mag,
+                                dt);
+            //    kalman_update_cnt = 0;
+            //}
+
             // 진북 기준 최종 오일러 각 추출 (라디안 단위)
             Attitude_t curAttitude = kalman.getEuler();
+
+
+            // if (++loop_cnt >= 20) { 
+            //     loop_cnt = 0;
+            //     ESP_LOGW(TAG, "acc.x: %8.4f, acc.y: %8.4f, acc.z: %8.4f, gyro.x: %8.4f, gyro.y: %8.4f, gyro.z: %8.4f, Roll: %8.4f, Pitch: %8.4f, Yaw: %8.4f", 
+            //        cur_imu_data.acc.x, cur_imu_data.acc.y, cur_imu_data.acc.z, cur_imu_data.gyro.x, cur_imu_data.gyro.y, cur_imu_data.gyro.z, curAttitude.roll, curAttitude.pitch, curAttitude.yaw); 
+            // }
+
 
             // 초기값은 우리나라 평균 편각인 -7.7f (서편각 7.7도)로 시작합니다.
             static float target_true_north = TARGET_TRUE_NORTH * (M_PI / 180.0f); 
@@ -251,10 +282,10 @@ void Flight::flight_task(void *pvParameters)
             float current_alt = v_kalman.getAltitude();
             float current_vel = v_kalman.getVelocity();
 
-            if (++loop_cnt >= 20) { 
-                loop_cnt = 0;
-                ESP_LOGI(TAG, "Altitude -> est_alt: %5.2f, est_vel: %5.2f", current_alt,current_vel);
-            }
+            // if (++loop_cnt >= 20) { 
+            //     loop_cnt = 0;
+            //     ESP_LOGI(TAG, "Altitude -> est_alt: %5.2f, est_vel: %5.2f", current_alt,current_vel);
+            // }
 
             static float target_rc_throttle = 0.0f;
             rc_data_t rc_data;
@@ -380,11 +411,14 @@ void Flight::flight_task(void *pvParameters)
             //             curAttitude.roll,        curAttitude.pitch,       curAttitude.yaw 
             //         );
             // }
+            gpio_set_level(DEBUG_GPIO_PIN, 0); // 📈 루프 끝: 핀을 Low로!
         } else {
             // Failsafe 트리거: 5ms 동안 Core 0로부터 동기화 신호(Notification)가 누락된 상황 예외 처리
             // SensorTask에서 신호가 안오면 작동이 불능이 되므로 이곳이 실행되어진다.
             ESP_LOGW(TAG, "비상: 센서 데이터 동기화 신호 지연 감지!");
         }
+        taskYIELD(); 
+        // 또는 vTaskDelay(0); 
     }
 }
 
