@@ -260,3 +260,31 @@ struct rc_data_t {
     RemoteControlType type;
 };
 
+
+// 비행 모드 열거형 정의
+enum class flyingMode_e : uint32_t {
+    MODE_MANUAL         = 0x00010000u,  
+    MODE_ALTCTL         = 0x00020000u,  
+    MODE_POSCTL         = 0x00030000u,  
+    MODE_OFFBOARD       = 0x00040000u,  
+    MODE_ACRO           = 0x00050000u,  
+    MODE_STABILIZED     = 0x00070000u,  
+    MODE_STANBY         = 0x03040000u,  
+    MODE_MISSION        = 0x04040000u,  
+    MODE_RTL            = 0x05040000u,  
+    MODE_PRECISION_LAND = 0x09040000u,  
+    MODE_USER_HOLD_MODE = 0x03040000u,  
+};
+
+// 시스템의 현재 상태 (예: 시동 여부, 비행 여부, 센서 캘리브레이션 상태 등)을 나타내는 열거형
+enum class systemState_e : uint8_t {                    
+    SYS_STATE_UNINIT,            
+    SYS_STATE_BOOT,              
+    SYS_STATE_CALIBRATING,       
+    SYS_STATE_STANDBY,           
+    SYS_STATE_ACTIVE,            
+    SYS_STATE_CRITICAL,          
+    SYS_STATE_EMERGENCY,         
+    SYS_STATE_POWEROFF,          
+    SYS_STATE_FLIGHT_TERMINATION, 
+};

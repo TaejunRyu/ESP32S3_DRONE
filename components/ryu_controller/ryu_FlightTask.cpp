@@ -149,6 +149,7 @@ void Flight::flight_task(void *pvParameters)
         prev_time = current_time;
         
         if (notification_value > 0){
+            //watch dog에 밥주자~~~~
             esp_task_wdt_reset(); 
 
             // 센서 캘리브레이션(0점 조절)이 완료될 때까지는 필터 연산을 유보하고 대기
@@ -285,10 +286,10 @@ void Flight::flight_task(void *pvParameters)
             // [고도 홀드 모드] RC 스로틀을 고도 목표로 활용하는 사용자 홀드 모드 처리
             static float hold_target_altitude = 1.5f;
             static bool is_user_hold_mode = false;
-            Controller::flyingMode_e current_mode;
+            flyingMode_e current_mode;
             Controller::DroneStatusManager::getInstance().checkAndGetFlyingMode(current_mode);
-            if (current_mode == Controller::flyingMode_e::MODE_STANBY ||
-                current_mode == Controller::flyingMode_e::MODE_ALTCTL) {
+            if (current_mode == flyingMode_e::MODE_STANBY ||
+                current_mode == flyingMode_e::MODE_ALTCTL) {
                 // 홀드 모드 진입 시 현재 고도를 목표 고도로 설정하여 부드러운 전환 유도
                 hold_target_altitude = current_alt;
                 float throttle_offset = (rc_data.throttle - 50.0f) * 0.01f;
@@ -312,6 +313,7 @@ void Flight::flight_task(void *pvParameters)
                 //     ESP_LOGI(TAG, "Hold Mode -> Target Alt: %5.2f, Hold Throttle: %5.2f", hold_target_altitude, altitude_throttle);
                 // }
             }
+
             // -------------------------------------------------------------
             // 핵심 연산: 자세 제어 명령을 병렬 독립 연산 처리
             // -------------------------------------------------------------
@@ -360,8 +362,8 @@ void Flight::flight_task(void *pvParameters)
             if (++qgc_publish_count >= 100) { 
                 qgc_publish_count = 0;                
                 QgcAttitude_t qgcAtt;
-                qgcAtt.att      = curAttitude;                  // 진북 보정 완료된 오일러각
-                qgcAtt.speed    = cur_imu_data.gyro * DEG_TO_RAD; // 각속도 라디안
+                qgcAtt.att      = curAttitude;                      // 진북 보정 완료된 오일러각
+                qgcAtt.speed    = cur_imu_data.gyro * DEG_TO_RAD;   // 각속도 라디안
                 qgcAtt.base_throttle = base_throttle;
                 qgcAtt.alt      = current_alt; 
                 qgcAtt.v_speed  = current_vel; 

@@ -244,20 +244,38 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
                     send_mav_command_ack(cmd.command, MAV_RESULT_ACCEPTED,0,0,msg->sysid,msg->compid);     
                     if (cmd.param1 > 0.5f && cmd.param1 < 1.5f) {
                         Controller::DroneStatusManager::getInstance().setArmed(true); // 시동
-                        Controller::DroneStatusManager::getInstance().setSystemState(Controller::systemState_e::SYS_STATE_ACTIVE);  
+                        Controller::DroneStatusManager::getInstance().setSystemState(systemState_e::SYS_STATE_ACTIVE);  
                         _heartbeat.base_mode  |= MAV_MODE_FLAG_SAFETY_ARMED;
-                        _heartbeat.system_status = Controller::systemState_e::SYS_STATE_ACTIVE; // 시스템 상태를 Active로 업데이트
+                        _heartbeat.system_status = systemState_e::SYS_STATE_ACTIVE; // 시스템 상태를 Active로 업데이트
                     } else if (cmd.param1 < 0.5f) {
                         Controller::DroneStatusManager::getInstance().setArmed(false);
-                        Controller::DroneStatusManager::getInstance().setSystemState(Controller::systemState_e::SYS_STATE_STANDBY); // 시스템 상태를 Standby로 업데이트
+                        Controller::DroneStatusManager::getInstance().setSystemState(systemState_e::SYS_STATE_STANDBY); // 시스템 상태를 Standby로 업데이트
                         _heartbeat.base_mode  &= ~MAV_MODE_FLAG_SAFETY_ARMED;
-                        _heartbeat.system_status = Controller::systemState_e::SYS_STATE_STANDBY; // 시스템 상태를 Standby로 업데이트
+                        _heartbeat.system_status = systemState_e::SYS_STATE_STANDBY; // 시스템 상태를 Standby로 업데이트
                     }
                     ESP_LOGI(TAG,"_heartbeat.system_status :%d ",_heartbeat.system_status);
                     break;
                 }
                 case MAV_CMD_NAV_TAKEOFF:{ //22
-                    MAV_CMD_NAV_TAKEOFF_func(msg,cmd);
+                    send_mav_command_ack(cmd.command, MAV_RESULT_ACCEPTED,0,0,msg->sysid,msg->compid);    
+
+
+
+                    // 파라미터	명칭	설명
+                    // Param 1	Pitch	이륙 시 유지할 최소 피치 각도 (단위: 도, Degree). 기체가 상승하며 앞/뒤로 기울어지는 정도를 제어합니다.
+                    // Param 2	Empty	비어 있음 (사용되지 않음).
+                    // Param 3	Empty	비어 있음 (사용되지 않음).
+                    // Param 4	Yaw	이륙 시 유지할 방향 (단위: 도). 보통 현재 헤딩(방향)을 유지하려면 NaN 혹은 0을 사용합니다.
+                    // Param 5	Latitude	이륙 지점의 위도 (Target Latitude). 0이면 현재 위치를 사용합니다.
+                    // Param 6	Longitude	이륙 지점의 경도 (Target Longitude). 0이면 현재 위치를 사용합니다.
+                    // Param 7	Altitude	이륙 목표 고도 (단위: 미터, m). 지면으로부터의 상대 고도(Relative Altitude)를 의미합니다.
+                    // 각 파라메터의 값에 따라 takeoff시에 고도를 얼마에 유지하면 안정적인 상황에서 대기 상태를 유지할 수 있을지 결정하는데 사용됩니다.
+                    // float tmp_yaw = cmd.param4; // yaw 각도 (deg)
+                    // float tmp_lat = cmd.param5; // 위도 (deg)
+                    // float tmp_lon = cmd.param6; // 경도 (deg)
+                    // float tmp_alt = cmd.param7; // 고도 (m)
+                    ESP_LOGI(TAG,"MAV_CMD_NAV_TAKEOFF_func MSG : (%d), CMD : (%d), PARAM1 :(%f), PARAM4 : (%f), PARAM5 : (%f), PARAM6 : (%f), PARAM7 : (%f)",
+                        msg->msgid,cmd.command,cmd.param1,cmd.param4,cmd.param5,cmd.param6,cmd.param7);
                     break;
                 }
                 case MAV_CMD_DO_SET_HOME:{ //179
@@ -343,7 +361,7 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
             _heartbeat.base_mode = cmd.base_mode;
             if (_heartbeat.base_mode & MAV_MODE_FLAG_CUSTOM_MODE_ENABLED) {                
                 _heartbeat.custom_mode = (uint32_t)cmd.custom_mode; //qgc용                        
-                Controller::DroneStatusManager::getInstance().setFlyingMode((Controller::flyingMode_e)cmd.custom_mode); // 내부 상태 매니저에도 반영
+                Controller::DroneStatusManager::getInstance().setFlyingMode((flyingMode_e)cmd.custom_mode); // 내부 상태 매니저에도 반영
             }
             ESP_LOGI(TAG, "MAVLINK_MSG_ID_SET_MODE custom mode: 0x%08X", cmd.custom_mode);
             break;
@@ -353,28 +371,6 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
         }
         
     }    
-}
-
-
-
-// 파라미터	명칭	설명
-// Param 1	Pitch	이륙 시 유지할 최소 피치 각도 (단위: 도, Degree). 기체가 상승하며 앞/뒤로 기울어지는 정도를 제어합니다.
-// Param 2	Empty	비어 있음 (사용되지 않음).
-// Param 3	Empty	비어 있음 (사용되지 않음).
-// Param 4	Yaw	이륙 시 유지할 방향 (단위: 도). 보통 현재 헤딩(방향)을 유지하려면 NaN 혹은 0을 사용합니다.
-// Param 5	Latitude	이륙 지점의 위도 (Target Latitude). 0이면 현재 위치를 사용합니다.
-// Param 6	Longitude	이륙 지점의 경도 (Target Longitude). 0이면 현재 위치를 사용합니다.
-// Param 7	Altitude	이륙 목표 고도 (단위: 미터, m). 지면으로부터의 상대 고도(Relative Altitude)를 의미합니다.
-// 각 파라메터의 값에 따라 takeoff시에 고도를 얼마에 유지하면 안정적인 상황에서 대기 상태를 유지할 수 있을지 결정하는데 사용됩니다.
-void Mavlink::MAV_CMD_NAV_TAKEOFF_func(mavlink_message_t *msg, mavlink_command_long_t cmd){    
-    send_mav_command_ack(cmd.command, MAV_RESULT_ACCEPTED,0,0,msg->sysid,msg->compid);    
-    // float tmp_yaw = cmd.param4; // yaw 각도 (deg)
-    // float tmp_lat = cmd.param5; // 위도 (deg)
-    // float tmp_lon = cmd.param6; // 경도 (deg)
-    // float tmp_alt = cmd.param7; // 고도 (m)
-    ESP_LOGI(TAG,"MAV_CMD_NAV_TAKEOFF_func MSG : (%d), CMD : (%d), PARAM1 :(%f), PARAM4 : (%f), PARAM5 : (%f), PARAM6 : (%f), PARAM7 : (%f)",
-        msg->msgid,cmd.command,cmd.param1,cmd.param4,cmd.param5,cmd.param6,cmd.param7);
-
 }
 
 
@@ -533,6 +529,12 @@ void Mavlink::MAV_CMD_REQUEST_PROTOCOL_VERSION_func(mavlink_message_t *msg, mavl
     send_mavlink_msg(&ack_msg);
 }
 
+/**
+ * @brief 
+ *      1. ESP-NOW 수신 큐에서 MAVLink 메시지 데이터 패킷을 대기 및 수신
+ * 
+ * @param pv 
+ */
 void Mavlink::inMessageQueueTask(void *pv)
 {
     //auto& mavlink =  Service::Mavlink::get_instance();
@@ -606,13 +608,12 @@ void Mavlink::on_timer_tick()
             // Controller::systemState_e current_state;
             // current_state = Controller::DroneStatusManager::getInstance().getSystemStateValue(); // 시스템 상태 업데이트 (예: 시동 여부 반영)
             
- 
             mavlink_msg_heartbeat_pack(ConfigMavlink::sys_id, ConfigMavlink::comp_id, &msg, 
                                         MAV_TYPE_QUADROTOR, 
                                         MAV_AUTOPILOT_PX4, 
                                         _heartbeat.base_mode,  
                                         _heartbeat.custom_mode, 
-                                        4);//(uint8_t)_heartbeat.system_status); // 시스템 상태를 현재 드론 상태로 업데이트);
+                                        (uint8_t)_heartbeat.system_status); // 시스템 상태를 현재 드론 상태로 업데이트);
             send_mavlink_msg(&msg);
             break;
         }
@@ -740,14 +741,14 @@ void Mavlink::on_timer_tick()
 
 esp_err_t Mavlink::initialize()
 {
-    _heartbeat ={
-        .base_mode =        MAV_MODE_FLAG_CUSTOM_MODE_ENABLED   |   //MAV_MODE_FLAG_TEST_ENABLED    |    // 테스트 모드 (실제 비행에서는 사용 안 함)
-                            MAV_MODE_FLAG_STABILIZE_ENABLED     |   // 자세 제어 활성화
-                            //MAV_MODE_FLAG_SAFETY_ARMED          |   // 시동(ARM) 활성화
-                            MAV_MODE_FLAG_MANUAL_INPUT_ENABLED,     // 원격제어 활성화
-        .custom_mode    =   (uint32_t)Controller::flyingMode_e::MODE_STABILIZED, // PX4 STABILIZE 모드: 0x00070000 (Main Mode 7) + 0x00000000 (Sub Mode 0)
-        .system_status  =   Controller::systemState_e::SYS_STATE_STANDBY
-    };
+    _heartbeat ={};
+
+    _heartbeat.base_mode    =   MAV_MODE_FLAG_CUSTOM_MODE_ENABLED   |   //MAV_MODE_FLAG_TEST_ENABLED    |    // 테스트 모드 (실제 비행에서는 사용 안 함)
+                                MAV_MODE_FLAG_STABILIZE_ENABLED     |   // 자세 제어 활성화
+                                //MAV_MODE_FLAG_SAFETY_ARMED          |   // 시동(ARM) 활성화
+                                MAV_MODE_FLAG_MANUAL_INPUT_ENABLED;     // 원격제어 활성화
+    _heartbeat.custom_mode    =   (uint32_t)flyingMode_e::MODE_STABILIZED; // PX4 STABILIZE 모드: 0x00070000 (Main Mode 7) + 0x00000000 (Sub Mode 0)
+    _heartbeat.system_status  =   systemState_e::SYS_STATE_STANDBY;
 
     // 중요........
     // timer의 callback과 연결하여 on_timer_tick를 타이머에의해서 실행함.

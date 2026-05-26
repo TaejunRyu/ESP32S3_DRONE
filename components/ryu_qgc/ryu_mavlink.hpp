@@ -6,10 +6,8 @@
 #include <c_library_v2/common/mavlink.h>
 #include <c_library_v2/mavlink_get_info.h>
 #include "ryu_Types.hpp"
-//#include "ryu_StateManager.hpp"
-namespace Controller{
-    enum class systemState_e : uint8_t; // 전방 선언
-}
+
+
 
 namespace Service{
     
@@ -18,9 +16,14 @@ class Mavlink{
         static constexpr const char* TAG = "Mavlink";
     
         struct heartbeat_t{
-            volatile uint8_t         base_mode;
-            volatile uint32_t        custom_mode;
-            volatile Controller::systemState_e   system_status; // 시스템 상태 추가
+            uint8_t        type            = MAV_TYPE_QUADROTOR;     
+            uint8_t        autopilot       = MAV_AUTOPILOT_PX4;
+            uint8_t        base_mode       = MAV_MODE_FLAG_CUSTOM_MODE_ENABLED   |   //MAV_MODE_FLAG_TEST_ENABLED    |    // 테스트 모드 (실제 비행에서는 사용 안 함)
+                                             MAV_MODE_FLAG_STABILIZE_ENABLED     |   // 자세 제어 활성화
+                                             //MAV_MODE_FLAG_SAFETY_ARMED          |   // 시동(ARM) 활성화
+                                             MAV_MODE_FLAG_MANUAL_INPUT_ENABLED;
+            uint32_t       custom_mode     = (uint32_t)flyingMode_e::MODE_STABILIZED;
+            systemState_e  system_status   = systemState_e::SYS_STATE_UNINIT; // 시스템 상태 추가
         };
 
     private:
@@ -44,7 +47,6 @@ class Mavlink{
         uint16_t map_qgc_to_ibus_final(int16_t raw_val, bool is_throttle);
         void handle_mavlink_message(mavlink_message_t *msg);
 
-        void MAV_CMD_NAV_TAKEOFF_func(mavlink_message_t *msg, mavlink_command_long_t cmd);
         void MAV_CMD_DO_SET_HOME_func(mavlink_message_t *msg, mavlink_command_long_t cmd);
         void MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES_func(mavlink_message_t *msg, mavlink_command_long_t cmd);
         void MAV_CMD_REQUEST_MESSAGE_func(mavlink_message_t *msg, mavlink_command_long_t cmd);
