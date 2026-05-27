@@ -10,7 +10,7 @@
  * 
  */
 #pragma once
-
+#include <algorithm>
 #include <esp_err.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -35,11 +35,15 @@ class Flight{
         esp_err_t deinitialize();
         static void flight_task(void* pvParameters);
         TaskHandle_t getTaskHandle(){return _taskHandle;};        
-        esp_err_t StartTask();
 
+        esp_err_t StartTask();
         // 2d rotation 조립하고 지자계의 정렬을 위한 함수.
         Vector3f rotateMagVector(const Vector3f &raw_mag, float rot_rad);
+        uint32_t throttle_to_pwm(float throttle){
+            const float clamped_pct = std::clamp(throttle, 0.0f, 100.0f);
+            return static_cast<uint32_t>(1000.0f + (clamped_pct / 100.0f) * 1000.0f);
 
+        };
     private:
         TaskHandle_t _taskHandle = nullptr;
         bool _initialized = false;

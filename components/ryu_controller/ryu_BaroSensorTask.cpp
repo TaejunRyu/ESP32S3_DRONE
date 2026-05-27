@@ -16,6 +16,8 @@ namespace Controller {
 
 esp_err_t BaroSensorTask::initialize()
 {
+    if (_initialized) return ESP_OK;
+
     if (!Driver::SPI::getInstance().is_initialized()){
         Driver::SPI::getInstance().initialize();
     }
@@ -26,14 +28,18 @@ esp_err_t BaroSensorTask::initialize()
         Sensor::BMP388::getInstance().initialize();
     }
 
+    _cal_gndPressure = false;
+    _initialized = true;
     return ESP_OK; // 🛠️ 구현되지 않은 상태 방지
 }
 
 
 void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
+
+    BaroSensorTask *task = static_cast<BaroSensorTask*>(pvParameters);
+
     auto& bmp388 = Sensor::BMP388::getInstance();
 
-    bool cal_gndPressure = false;
     float sumPressure{0};
     uint16_t sumCount{0};
     
@@ -59,18 +65,18 @@ void BaroSensorTask::ReadBaroSensorTask(void* pvParameters) {
             communication_fail_count = 0;
 
             // 1. 초기 100샘플(약 4초) 동안 지면 기압 평균 산출
-            if (!cal_gndPressure) {
+            if (!task->get_cal_gndPressure()) {
                 sumPressure += pressure;
                 ++sumCount;
                 if (sumCount >= 100) { 
                     gnd_pressure = sumPressure / static_cast<float>(sumCount);
-                    cal_gndPressure = true;       
+                    task->set_cal_gndPressure(true);
                     ESP_LOGI(TAG, "Ground Pressure Calibration Success! Base: %.3f hPa", gnd_pressure);
                 }
             } 
 
             // 2. 지면 기압 확정 후 고도 연산
-            if (cal_gndPressure) {
+            if (task->get_cal_gndPressure()) {
                 // 표준 대기압 공식 기반 절대 고도 계산
                 currentAlt = 44330.0f * (1.0f - powf(pressure / gnd_pressure, 0.190295f));
                 

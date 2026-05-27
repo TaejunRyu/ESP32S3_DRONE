@@ -1,4 +1,5 @@
 #include "ryu_PidController.hpp"
+
 #include <cmath>
 
 namespace Controller {
@@ -81,9 +82,9 @@ Vector3f PidControl::updateCascade(const Attitude_t& target_att,
     // -------------------------------------------------------------
     // 2단계: Inner Loop - 각속도 제어 (목표 각속도 - 정제 자이로 속도)
     // -------------------------------------------------------------
-    float roll_rate_err  = target_roll_rate - current_rate.x;
-    float pitch_rate_err = target_pitch_rate - current_rate.y;
-    float yaw_rate_err   = target_yaw_rate - current_rate.z;
+    float roll_rate_err  = target_roll_rate     - current_rate.x;
+    float pitch_rate_err = target_pitch_rate    - current_rate.y;
+    float yaw_rate_err   = target_yaw_rate      - current_rate.z;
 
     // 액추에이터 믹싱용 최종 축별 가감산 제어 토크 지표 산출
     control_output.x = updateSinglePid(roll_rate_err,  _rate_integral[0], _rate_prev_err[0], _rate_p_roll,  dt);
@@ -135,75 +136,3 @@ float PidControl::updateAltitudeCascade(float target_alt, float current_alt, flo
 }
 
 } // namespace Controller
-
-
-
-
-// #include "ryu_PidController.hpp"
-// #include "esp_log.h"
-
-// void flight_control_task(void* pvParameters) {
-//     // 1. 싱글톤 제어기 획득
-//     auto& pid = Controller::PidControl::getInstance();
-
-//     // 2. [자세 게인 튜닝 파라미터 주입] 구조: {Kp, Ki, Kd, I_Limit, Out_Limit}
-//     Controller::PidParams att_angle = {2.5f, 0.0f, 0.0f, 0.0f, 10.0f};  // 바깥 각도 루프
-//     Controller::PidParams att_rate  = {0.08f, 0.02f, 0.001f, 0.5f, 40.0f}; // 안쪽 각속도 루프
-//     pid.setAngleParams(att_angle, att_angle, att_angle);
-//     pid.setRateParams(att_rate, att_rate, att_rate);
-
-//     // 3. [고도 게인 튜닝 파라미터 독립 주입]
-//     Controller::AltitudeParams alt_config;
-//     alt_config.kp_alt         = 1.2f;   // 고도 -> 속도 변환율
-//     alt_config.kp_vel         = 1.8f;   // 속도 P
-//     alt_config.ki_vel         = 0.4f;   // 속도 I
-//     alt_config.kd_vel         = 0.01f;  // 속도 D
-//     alt_config.vel_limit      = 2.0f;   // 최대 2m/s
-//     alt_config.hover_throttle = 43.5f;  // 이 기체의 공중 유지 호버링 스로틀 추정치 43.5%
-//     alt_config.out_limit      = 85.0f;  // 최대 출력 한계 제한
-//     pid.setAltitudeParams(alt_config);
-
-//     pid.reset();
-
-//     const float dt = 0.001f; // 1ms 초고속 고정 루프 주기
-//     uint32_t loop_cnt = 0;
-
-//     // 가상의 목표치 선언 (호버링 벤치마킹 타겟)
-//     Attitude_t target_pose = {0.0f, 0.0f, 0.0f}; // 수평 유지
-//     float target_altitude  = 1.5f;               // 1.5m 고도 홀딩 명령
-
-//     while (true) {
-//         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
-
-//         // [이전 단계들 연동 소스 매핑]
-//         // 1) EKF 가 계산한 현재 자세 각도 및 수직 가속도 융합 고도/속도 수렴 데이터 취득
-//         Attitude_t current_pose = Filter::KalmanFilter::getInstance().getEuler();
-//         Vector3f current_gyro   = get_clean_gyro_rad_per_sec();
-        
-//         float current_alt = Filter::VerticalFilter::getInstance().getAltitude();
-//         float current_vel = Filter::VerticalFilter::getInstance().getVelocity();
-
-//         // -------------------------------------------------------------
-//         // 핵심 연산: 자세와 고도 제어 명령을 병렬 독립 연산 처리
-//         // -------------------------------------------------------------
-//         Vector3f att_outputs = pid.updateCascade(target_pose, current_pose, current_gyro, dt);
-//         float base_throttle  = pid.updateAltitudeCascade(target_altitude, current_alt, current_vel, dt);
-
-//         // -------------------------------------------------------------
-//         // 최종 믹싱 단계: 고도 스로틀(Base)에 자세 복원력을 축별 가감산 (Quadcopter X-Type 기준)
-//         // -------------------------------------------------------------
-//         float motor1_FR = base_throttle - att_outputs.x - att_outputs.y - att_outputs.z; // 전방 우측
-//         float motor2_BL = base_throttle + att_outputs.x + att_outputs.y - att_outputs.z; // 후방 좌측
-//         float motor3_FL = base_throttle + att_outputs.x - att_outputs.y + att_outputs.z; // 전방 좌측
-//         float motor4_BR = base_throttle - att_outputs.x + att_outputs.y + att_outputs.z; // 후방 우측
-
-//         // 하드웨어 하위 모터 드라이버(MCPWM/ESC 10%~90%) 입력 마진 가이드 인가부 연동 생략...
-
-//         // 축약 로깅 처리 출력 부
-//         if (++loop_cnt >= 20) { 
-//             loop_cnt = 0;
-//             ESP_LOGI("FLIGHT", "Th: %5.1f%% | RollOut: %5.2f | PitchOut: %5.2f | YawOut: %5.2f", 
-//                      base_throttle, att_outputs.x, att_outputs.y, att_outputs.z);
-//         }
-//     }
-// }

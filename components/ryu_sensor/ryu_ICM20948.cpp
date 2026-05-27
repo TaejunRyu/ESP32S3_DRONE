@@ -121,74 +121,78 @@ esp_err_t ICM20948::read_data(SensorData &raw) {
     
     select_bank(0);
     
-    if (_ibus->get_type() == Interface::BusType::I2C) {
-        // I2C 모드: 가속도(6) + 자이로(6) + 온도(2) = 총 14바이트 연속 읽기
-        uint8_t d[14]{0,};
-        err = _ibus->Read(B0_ACCEL_XOUT_H, d, 14);
-        if (err != ESP_OK) return err;
+    //if (_ibus->get_type() == Interface::BusType::SPI) [[likely]] {
+    // SPI 모드: 24바이트 연속 리딩 (Accel 6 + Gyro 6 + Temp 2 + Mag 10)
+    uint8_t d[24]{0,};
+    err = _ibus->Read(B0_ACCEL_XOUT_H, d, 24);
+    if (err != ESP_OK) return err;
 
-        raw.acc.x = (float)((int16_t)((d[0] << 8) | d[1])) * ACCEL_SCALE;
-        raw.acc.y = (float)((int16_t)((d[2] << 8) | d[3])) * ACCEL_SCALE;
-        raw.acc.z = (float)((int16_t)((d[4] << 8) | d[5])) * ACCEL_SCALE;
-        
-        raw.gyro.x = (float)((int16_t)((d[6] << 8) | d[7])) * GYRO_SCALE;
-        raw.gyro.y = (float)((int16_t)((d[8] << 8) | d[9])) * GYRO_SCALE;
-        raw.gyro.z = (float)((int16_t)((d[10] << 8) | d[11])) * GYRO_SCALE;
-        
-        //raw.temperature = (float)((int16_t)((d[12] << 8) | d[13])); 
-        raw.is_mag_updated = false; 
-    } 
-    else {
-        // SPI 모드: 24바이트 연속 리딩 (Accel 6 + Gyro 6 + Temp 2 + Mag 10)
-        uint8_t d[24]{0,};
-        err = _ibus->Read(B0_ACCEL_XOUT_H, d, 24);
-        if (err != ESP_OK) return err;
+    raw.acc.x = (float)((int16_t)((d[0] << 8) | d[1])) * ACCEL_SCALE;
+    raw.acc.y = (float)((int16_t)((d[2] << 8) | d[3])) * ACCEL_SCALE;
+    raw.acc.z = (float)((int16_t)((d[4] << 8) | d[5])) * ACCEL_SCALE;
 
-        raw.acc.x = (float)((int16_t)((d[0] << 8) | d[1])) * ACCEL_SCALE;
-        raw.acc.y = (float)((int16_t)((d[2] << 8) | d[3])) * ACCEL_SCALE;
-        raw.acc.z = (float)((int16_t)((d[4] << 8) | d[5])) * ACCEL_SCALE;
+    raw.gyro.x = (float)((int16_t)((d[6] << 8) | d[7])) * GYRO_SCALE;
+    raw.gyro.y = (float)((int16_t)((d[8] << 8) | d[9])) * GYRO_SCALE;
+    raw.gyro.z = (float)((int16_t)((d[10] << 8) | d[11])) * GYRO_SCALE;
+    
+    //raw.temperature = (float)((int16_t)((d[12] << 8) | d[13])); 
 
-        raw.gyro.x = (float)((int16_t)((d[6] << 8) | d[7])) * GYRO_SCALE;
-        raw.gyro.y = (float)((int16_t)((d[8] << 8) | d[9])) * GYRO_SCALE;
-        raw.gyro.z = (float)((int16_t)((d[10] << 8) | d[11])) * GYRO_SCALE;
-        
-        //raw.temperature = (float)((int16_t)((d[12] << 8) | d[13])); 
+    if (_include_mag) {    
+        // 지자계 상태 레지스터 추출 (배열 인덱스는 사용자의 SLV0 설정에 맞게 매칭)
+        uint8_t st1 = d[14]; 
+        uint8_t st2 = d[23]; 
 
-        if(_include_mag){
-            // 지자계 상태 레지스터 추출
-            uint8_t st1 = d[14]; 
-            uint8_t st2 = d[23]; // ※ 주의: SLV0 설정이 10바이트 읽기여야 올바른 위치입니다.
+        // [최고속 패스] 10번 중 9번은 일어나는 '데이터 미갱신' 상태를 최상단에서 1클럭만에 커트
+        if (!(st1 & 0x01))[[unlikely]] {
+            raw.is_mag_updated = false;
+            // 에러가 아니므로 가속도/자이로 데이터를 살리기 위해 그대로 함수 하단 진행 (return 안 함)
+        } 
+        else {
+            // [정상 데이터 진입] 데이터가 있을 때만 비트 결합 연산 수행 (90% 연산 절감)
+            int16_t raw_mag_x = (int16_t)(((d[16] & 0xFF) << 8) | (d[15] & 0xFF));
+            int16_t raw_mag_y = (int16_t)(((d[18] & 0xFF) << 8) | (d[17] & 0xFF));
+            int16_t raw_mag_z = (int16_t)(((d[20] & 0xFF) << 8) | (d[19] & 0xFF));
 
-            // 1단계 비트 결합: AK09916 리틀 엔디안 결합을 int16_t 정수형으로 명확하게 처리
-            int16_t raw_mag_x = (int16_t)((d[16] << 8) | d[15]);
-            int16_t raw_mag_y = (int16_t)((d[18] << 8) | d[17]);
-            int16_t raw_mag_z = (int16_t)((d[20] << 8) | d[19]);
-
-            // 지자계 최종 스케일 변환 (float 형 대응)
-            raw.mag.x = (float)raw_mag_x * MAG_SCALE; 
-            raw.mag.y = (float)raw_mag_y * MAG_SCALE;
-            raw.mag.z = (float)raw_mag_z * MAG_SCALE;            
-
-            // ⚠️ 방어 코드: ST2의 오버플로우(HOFL) 비트가 켜졌거나, 데이터가 모두 완전한 0인 물리적 락 상태 검증
-            if ((st2 & 0x08) || (fabsf(raw.mag.x) < 0.0001f && fabsf(raw.mag.y) < 0.0001f && fabsf(raw.mag.z) < 0.0001f)) {
+            // 예외 검사: ST2 오버플로우 또는 물리적 락(올 제로) 감지
+            if ((st2 & 0x08) || (raw_mag_x == 0 && raw_mag_y == 0 && raw_mag_z == 0)) {
+                ESP_LOGW(TAG, "지자계 락 감지 - 논블로킹 복구 시도");
+                
                 select_bank(0);
-                _ibus->Write(B0_USER_CTRL, 0x02); // I2C_MST_RST (마스터 리셋으로 락 해제)
-                vTaskDelay(pdMS_TO_TICKS(5));     // 버스 안정화를 위해 5ms 대기
-                _ibus->Write(B0_USER_CTRL, 0x20); // I2C_MST_EN  (마스터 재가동)
+                _ibus->Write(B0_USER_CTRL, 0x02); // I2C_MST_RST (마스터 리셋)
+                // ⚠️ 1ms 루프 보호: vTaskDelay(5)를 과감히 제거합니다.
+                // 대신 마스터를 리셋하고 다음 1ms 루프(혹은 다다음 루프)에서 자연스럽게 재가동되도록 유도합니다.
+                _ibus->Write(B0_USER_CTRL, 0x20); // I2C_MST_EN
+
                 raw.is_mag_updated = false;
-                ESP_LOGW(TAG,"ST2 Overflow... Under Repair...");
                 return ESP_FAIL; 
             }
 
-            // 지자계 데이터 정상 갱신 검사 (Data Ready)
-            if (st1 & 0x01) {
-                raw.is_mag_updated = true;
-                //raw.mag_timestamp = raw.timestamp;
-            } else { 
-                raw.is_mag_updated = false;
-            }
+            // 모든 검사를 통과한 진짜 정상 데이터인 경우에만 Float 변환 실행
+            raw.mag.x = (float)raw_mag_x * MAG_SCALE; 
+            raw.mag.y = (float)raw_mag_y * MAG_SCALE;
+            raw.mag.z = (float)raw_mag_z * MAG_SCALE;            
+            raw.is_mag_updated = true;
+            // raw.mag_timestamp = raw.timestamp;
         }
     }
+    // }else if (_ibus->get_type() == Interface::BusType::I2C) {
+    //     // I2C 모드: 가속도(6) + 자이로(6) + 온도(2) = 총 14바이트 연속 읽기
+    //     uint8_t d[14]{0,};
+    //     err = _ibus->Read(B0_ACCEL_XOUT_H, d, 14);
+    //     if (err != ESP_OK) return err;
+
+    //     raw.acc.x = (float)((int16_t)((d[0] << 8) | d[1])) * ACCEL_SCALE;
+    //     raw.acc.y = (float)((int16_t)((d[2] << 8) | d[3])) * ACCEL_SCALE;
+    //     raw.acc.z = (float)((int16_t)((d[4] << 8) | d[5])) * ACCEL_SCALE;
+        
+    //     raw.gyro.x = (float)((int16_t)((d[6] << 8) | d[7])) * GYRO_SCALE;
+    //     raw.gyro.y = (float)((int16_t)((d[8] << 8) | d[9])) * GYRO_SCALE;
+    //     raw.gyro.z = (float)((int16_t)((d[10] << 8) | d[11])) * GYRO_SCALE;
+        
+    //     //raw.temperature = (float)((int16_t)((d[12] << 8) | d[13])); 
+    //     raw.is_mag_updated = false; 
+    // } 
+    
     return err;
 }
 

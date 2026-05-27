@@ -26,6 +26,8 @@ class BaroSensorTask{
         // bmp388 cs pin
         inline static constexpr int SPI_CS_PIN = 10;
         static void ReadBaroSensorTask(void *pvParameters);
+        bool get_cal_gndPressure(){return _cal_gndPressure;};
+        void set_cal_gndPressure(bool val){_cal_gndPressure = val;};
         void StartTask();
 
         bool is_initialized(){return _initialized;};
@@ -34,6 +36,7 @@ class BaroSensorTask{
 
     private:
         TaskHandle_t _taskHandle = nullptr;
+        bool _cal_gndPressure = false;
         bool _initialized = false;
 
 };
