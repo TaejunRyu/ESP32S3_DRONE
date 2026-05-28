@@ -93,6 +93,15 @@ void Mavlink::handle_mavlink_message(mavlink_message_t *msg)
     switch (msg->msgid) {      
 
         case MAVLINK_MSG_ID_MANUAL_CONTROL:{
+
+            // 이거는 flysky에서 데이터가 들어올때 SharedDataManager에 변수만 체크할수 있도록 변경해야 할것임.
+            // 실제 데이터를 참조하는 것은 데이터의 복사하는 과정이 있기때문에 안됨. (수정할것.)
+            rc_data_t rc_data = Controller::SharedDataManager::getInstance().get_shared_data<Controller::Data_type::DT_RC_DATA>();
+            if (rc_data.type == RC_FLYSKY) {
+                // flysky 모드에서는 QGC에서 오는 RC 입력을 무시하도록 처리 (우선순위: flysky > QGC)
+                break;
+            }
+
             // x, y, z, r 값은 이미 -1000 ~ 1000 (또는 z는 0~1000) 범위입니다.
             float y = static_cast<float>(mavlink_msg_manual_control_get_x(msg)); // Roll
             float x = static_cast<float>(mavlink_msg_manual_control_get_y(msg)); // Pitch

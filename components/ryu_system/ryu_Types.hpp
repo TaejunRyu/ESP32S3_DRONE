@@ -243,6 +243,7 @@ struct gps_data_t {
 
 // 8. RC 데이터가 어디서 들어오는지에 따라 RC 데이터 타입을 구분하기 위한 열거형과 구조체 정의
 enum RemoteControlType{
+    RC_NONE = 0,
     RC_FLYSKY,
     RC_QGC
 };
@@ -288,3 +289,5 @@ enum class systemState_e : uint8_t {
     SYS_STATE_POWEROFF,          
     SYS_STATE_FLIGHT_TERMINATION, 
 };
+
+

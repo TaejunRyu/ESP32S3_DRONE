@@ -7,13 +7,16 @@ idf_component_register(
             "."  
     REQUIRES
         log
+        esp_driver_uart
         esp_driver_gpio
         esp_driver_spi    
         esp_driver_i2c    
+        esp_timer
         esp_adc
         freertos
         led_strip
         #esp_driver_ledc 
         #esp_adc 
-        esp_driver_mcpwm
+        ryu_system
+        ryu_controller
 )

@@ -184,9 +184,9 @@ void Flight::flight_task(void *pvParameters)
         gpio_set_level(DEBUG_GPIO_PIN, 1); // 루프 시작: 핀을 High로!
 
         cur_imu_data = sharedData.get_shared_data< Data_type::DT_IMU_DATA>();
-        if(cur_imu_data.is_mag_updated){
-            cur_imu_data.mag.normalize();
-        }
+        // if(cur_imu_data.is_mag_updated){
+        //     cur_imu_data.mag.normalize();
+        // }
 
         //IST8310 MagSensorTask에서 보내온 데이터를 받는다.
         { // 이블럭을 제거하면 ak09916으로 mag가 대체되어진다.
@@ -194,7 +194,7 @@ void Flight::flight_task(void *pvParameters)
             if(sharedData.is_mag_updated()){  // 업데이트 될때만 받아와서 적용한다.
                 cur_mag_data = sharedData.get_shared_data< Data_type::DT_MAG_DATA>();
                 cur_imu_data.mag = cur_mag_data;   // 지자계를 대체한다.
-                cur_imu_data.mag.normalize();        
+                //cur_imu_data.mag.normalize();        
             }
         }
 
@@ -287,29 +287,38 @@ void Flight::flight_task(void *pvParameters)
         //     ESP_LOGI(TAG, "Altitude -> est_alt: %5.2f, est_vel: %5.2f", current_alt,current_vel);
         // }
 
-        // flysky rc 입력 처리: 목표 자세에 RC 입력을 반영하는 예시 (실제 제어 모드에 따라 다르게 적용 가능)
-        static bool flysky_mode_active = false;
-        if (flysky_mode_active) {  
-            rc_data_t rc_data = sharedData.get_shared_data<Data_type::DT_RC_DATA>();
-            target_pose.roll  = rc_data.roll * DEG_TO_RAD;  
-            target_pose.pitch = rc_data.pitch * DEG_TO_RAD;
-            target_pose.yaw   = rc_data.yaw * DEG_TO_RAD;
-        }
-        else{
-            static float target_rc_throttle = 0.0f;
-            rc_data_t rc_data;
-            if(sharedData.is_rc_updated()){
-                rc_data = sharedData.get_shared_data<Data_type::DT_RC_DATA>();
-                // RC 입력이 유효한 범위 내에 있을 때만 목표 자세에 반영 (예: -45도 ~ +45도)
-                if (std::abs(rc_data.roll) < 45.0f && std::abs(rc_data.pitch) < 45.0f && std::abs(rc_data.yaw) < 45.0f) {
-                    target_pose.roll  = rc_data.roll * DEG_TO_RAD;  
-                    target_pose.pitch = rc_data.pitch * DEG_TO_RAD;
-                    target_pose.yaw   = rc_data.yaw * DEG_TO_RAD;
-                }
-                target_rc_throttle = rc_data.throttle;
-                // ESP_LOGI(TAG, "RC Input -> Throttle: %5.2f, Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f, HoldMode: %d", 
-                //             rc_data.throttle, rc_data.roll, rc_data.pitch, rc_data.yaw, is_user_hold_mode);
+        rc_data_t rc_data{};
+        static float target_rc_throttle = 0.0f;        
+        //&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+        //  flysky에서 데이터가 들어오면  qgc에서 오는 rc데이터는 무시하도록 한다.  flysky가 우선순위가 높다.  
+        // flysky에서 싱호가 들어오면 qgc에서 오는 신호를 어떻게 무시하게 할까?
+        //&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+        rc_data = sharedData.get_shared_data<Data_type::DT_RC_DATA>();
+        
+        if(sharedData.is_rc_updated()){
+            // flysky 모드에서는 RC 입력을 직접적으로 목표 자세에 반영 (예: 스틱 조작이 즉각적으로 자세 목표에 영향)
+            if(rc_data.type == RC_FLYSKY){    
+                // 입력되어진 rc에 대해서 30도만 목표 자세에 반영하도록 범위를 제한하여 극단적 입력에 대한 안전장치 역할 수행
+                // 데이터를 30도로 스케일링하여 목표 자세에 적용 (예: 최대 ±30도 범위로 제한)
+                target_pose.roll  = rc_data.roll * 0.5f * DEG_TO_RAD;   // 최대 ±30도 (0.5배 스케일링)
+                target_pose.pitch = rc_data.pitch * 0.5f * DEG_TO_RAD;
+                target_pose.yaw   = rc_data.yaw * 0.5f * DEG_TO_RAD;
+                target_rc_throttle = rc_data.throttle; // 스로틀은 그대로 반영하여 고도 제어와 병행 가능하도록 합니다.
+
+            } else if (rc_data.type == RC_QGC) {  
+                // 다른 RC 타입이 활성화된 경우, 안전을 위해 목표 자세를 초기화하거나 유지
+                target_pose.roll  = rc_data.roll * 0.5f * DEG_TO_RAD;   // 최대 ±30도 (0.5배 스케일링)
+                target_pose.pitch = rc_data.pitch * 0.5f * DEG_TO_RAD;
+                target_pose.yaw   = rc_data.yaw * 0.5f * DEG_TO_RAD;
+                target_rc_throttle = rc_data.throttle; // 스로틀은 그대로 반영하여 고도 제어와 병행 가능하도록 합니다.
+            } else if (rc_data.type == RC_NONE) {
+                // RC 입력이 없는 경우, 안전한 기본 자세 유지 또는 고도 홀드 모드로 전환
+                // is_user_hold_mode = true; // RC 입력이 없을 때 고도 홀드 모드 활성화 (선택 사항)                
+                target_pose = {0.0f, 0.0f, 0.0f};
+                target_rc_throttle = 0.0f; // 스로틀도 안전하게 초기화
             }
+            // ESP_LOGI(TAG, "RC Input -> Throttle: %5.2f, Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f, HoldMode: %d", 
+            //             rc_data.throttle, rc_data.roll, rc_data.pitch, rc_data.yaw, is_user_hold_mode);
         }
 
         // 8. 자이로 데이터에 간단한 저역 통과 필터 적용 (노이즈 완화)

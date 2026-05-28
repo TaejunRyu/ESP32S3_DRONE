@@ -42,8 +42,8 @@
         GPIO_NUM_14
 
     6) FLYSKY CONTROLLER (UART 2)
-        GPIO_NUM_17
-        GPIO_NUM_18
+        RX : GPIO_NUM_17
+        TX : GPIO_NUM_18
 
     7) BATTERY CHECK 
         GPIO_NUM_3

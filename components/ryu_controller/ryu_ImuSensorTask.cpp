@@ -32,7 +32,7 @@ esp_err_t ImuSensorTask::initialize()
         Sensor::ICM20948::getInstance().set_bus(imu_interface);
         Sensor::ICM20948::getInstance().initialize();
         Sensor::ICM20948::getInstance().enable_mag_bypass();
-        Sensor::ICM20948::getInstance().set_include_mag(true);  // ak09916포함
+        Sensor::ICM20948::getInstance().set_include_mag(false);  // ak09916포함
     }
 
     //Sensor::ICM20948::getInstance().calibration_mag_hard_iron();
