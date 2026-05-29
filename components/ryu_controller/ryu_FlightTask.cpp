@@ -234,27 +234,8 @@ void Flight::flight_task(void *pvParameters)
         while (curAttitude.yaw > M_PI)  curAttitude.yaw -= 2.0f * M_PI;
         while (curAttitude.yaw < -M_PI) curAttitude.yaw += 2.0f * M_PI;
         
-        // 1. [핵심] 기존 자세 EKF로부터 실시간 최신 쿼터니언 상태 변수 취득
-        // (이 값이 실시간 기체의 롤, 피치 기울임 정보를 온전히 담고 있습니다.)
-        float q_buffer[4] = {1.0f, 0.0f, 0.0f, 0.0f};
-        kalman.getQuaternion(q_buffer);
-        float q0 = q_buffer[0];     // scalar part (실수부)
-        float q1 = q_buffer[1];     // X축 회전 관여 
-        float q2 = q_buffer[2];     // Y축 회전 관여
-        float q3 = q_buffer[3];     // Z축 회전 관여
-
-        Vector3f acc{};
-        // 센서 원시 데이터(m/s^2)를 9.81로 나누어 단위를 G 규격(정지 시 1.0)으로 가공
-        acc   = cur_imu_data.acc / 9.80665f; 
-
-        // 3. 취득한 기존 EKF 쿼터니언을 이용하여 체프 가속도를 지구 수직 방향(Z축 Down)으로 회전 투영
-        float acc_z_earth = 2.0f * (q1*q3 - q0*q2) * acc.x + 
-                            2.0f * (q0*q1 + q2*q3) * acc.y + 
-                            (q0*q0 - q1*q1 - q2*q2 + q3*q3) * acc.z;
-
-        // 4. 중력 성분을 제거한 순수 수직 가속도를 m/s^2 단위로 변환하여 필터 예측 단계에 공급
-        // (호버링 중에는 0.0f 근처에 머물러야 합니다.)
-        float pure_vertical_accel = (acc_z_earth - 1.0f) * 9.80665f;
+        // 4. 자북 기준의 최신 자세에서 수직 가속도 성분만을 추출하여 칼만 필터 예측 단계에 투입할 '순수 수직 가속도'로 가공
+        float pure_vertical_accel = kalman.get_pure_vertical_accel(cur_imu_data.acc);
 
         // 5. 1ms 주기로 수직 칼만필터 시간 예측 단계 실행
         v_kalman.predict(pure_vertical_accel, dt);
@@ -300,17 +281,17 @@ void Flight::flight_task(void *pvParameters)
             if(rc_data.type == RC_FLYSKY){    
                 // 입력되어진 rc에 대해서 30도만 목표 자세에 반영하도록 범위를 제한하여 극단적 입력에 대한 안전장치 역할 수행
                 // 데이터를 30도로 스케일링하여 목표 자세에 적용 (예: 최대 ±30도 범위로 제한)
-                target_pose.roll  = rc_data.roll * 0.5f * DEG_TO_RAD;   // 최대 ±30도 (0.5배 스케일링)
-                target_pose.pitch = rc_data.pitch * 0.5f * DEG_TO_RAD;
-                target_pose.yaw   = rc_data.yaw * 0.5f * DEG_TO_RAD;
-                target_rc_throttle = rc_data.throttle; // 스로틀은 그대로 반영하여 고도 제어와 병행 가능하도록 합니다.
+                target_pose.roll    = rc_data.roll * 0.5f * DEG_TO_RAD;   // 최대 ±30도 (0.5배 스케일링)
+                target_pose.pitch   = rc_data.pitch * 0.5f * DEG_TO_RAD;
+                target_pose.yaw     = rc_data.yaw * 0.5f * DEG_TO_RAD;
+                target_rc_throttle  = rc_data.throttle; // 스로틀은 그대로 반영하여 고도 제어와 병행 가능하도록 합니다.
 
             } else if (rc_data.type == RC_QGC) {  
                 // 다른 RC 타입이 활성화된 경우, 안전을 위해 목표 자세를 초기화하거나 유지
-                target_pose.roll  = rc_data.roll * 0.5f * DEG_TO_RAD;   // 최대 ±30도 (0.5배 스케일링)
-                target_pose.pitch = rc_data.pitch * 0.5f * DEG_TO_RAD;
-                target_pose.yaw   = rc_data.yaw * 0.5f * DEG_TO_RAD;
-                target_rc_throttle = rc_data.throttle; // 스로틀은 그대로 반영하여 고도 제어와 병행 가능하도록 합니다.
+                target_pose.roll    = rc_data.roll * 0.5f * DEG_TO_RAD;   // 최대 ±30도 (0.5배 스케일링)
+                target_pose.pitch   = rc_data.pitch * 0.5f * DEG_TO_RAD;
+                target_pose.yaw     = rc_data.yaw * 0.5f * DEG_TO_RAD;
+                target_rc_throttle  = rc_data.throttle; // 스로틀은 그대로 반영하여 고도 제어와 병행 가능하도록 합니다.
             } else if (rc_data.type == RC_NONE) {
                 // RC 입력이 없는 경우, 안전한 기본 자세 유지 또는 고도 홀드 모드로 전환
                 // is_user_hold_mode = true; // RC 입력이 없을 때 고도 홀드 모드 활성화 (선택 사항)                
@@ -337,6 +318,7 @@ void Flight::flight_task(void *pvParameters)
         static float hold_target_altitude = 1.5f;
         static bool is_user_hold_mode = false;
         flyingMode_e current_mode{};
+        
         Controller::DroneStatusManager::getInstance().checkAndGetFlyingMode(current_mode);
         if ((current_mode == flyingMode_e::MODE_STANBY) || (current_mode == flyingMode_e::MODE_ALTCTL)) {
             // 홀드 모드 진입 시 현재 고도를 목표 고도로 설정하여 부드러운 전환 유도

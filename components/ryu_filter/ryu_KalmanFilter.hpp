@@ -32,6 +32,7 @@ public:
     float getZErr(){return z_err;};
     
     void getQuaternion(float out_q[4]) const;
+    float get_pure_vertical_accel(Vector3f acc) ;
 private:
     KalmanFilter();
     ~KalmanFilter() = default;
