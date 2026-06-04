@@ -4,6 +4,7 @@
  */
 
 #pragma once
+
 #include <atomic> 
 #include "ryu_Types.hpp"
 
@@ -35,6 +36,7 @@ class SharedDataManager {
 private:
     static constexpr const char* TAG = "SharedDataManager";    
     SharedDataManager(){}
+
     // [Writers 제약 조건] 
     // 본 더블 버퍼 구조는 각 Data_type별로 데이터를 쓰는 태스크(Writer)가 '단 1개'일 때만 원자성이 보장됩니다.
     SensorData      _imu_buffer[2]      = {};

@@ -188,7 +188,7 @@ void Flight::flight_task(void *pvParameters)
         //     cur_imu_data.mag.normalize();
         // }
 
-        //IST8310 MagSensorTask에서 보내온 데이터를 받는다.
+        //  IST8310 MagSensorTask에서 보내온 데이터를 받는다.
         { // 이블럭을 제거하면 ak09916으로 mag가 대체되어진다.
             cur_imu_data.mag = 0.0f;
             if(sharedData.is_mag_updated()){  // 업데이트 될때만 받아와서 적용한다.
@@ -393,12 +393,12 @@ void Flight::flight_task(void *pvParameters)
             qgc_publish_count = 0;                
             QgcAttitude_t qgcAtt;
             
-            qgcAtt.att          = curAttitude;                      // 진북 보정 완료된 오일러각
-            qgcAtt.speed        = cur_imu_data.gyro * DEG_TO_RAD;   // 각속도 라디안
-            qgcAtt.base_throttle = base_throttle;
+            qgcAtt.att              = curAttitude;                      // 진북 보정 완료된 오일러각
+            qgcAtt.speed            = cur_imu_data.gyro * DEG_TO_RAD;   // 각속도 라디안
+            qgcAtt.base_throttle    = base_throttle;
 
-            qgcAtt.alt          = current_alt; 
-            qgcAtt.v_speed      = current_vel; 
+            qgcAtt.alt              = current_alt; 
+            qgcAtt.v_speed          = current_vel; 
             sharedData.publish_data<Data_type::DT_QGC_ATTITUDE>(qgcAtt);
         }
 
@@ -419,6 +419,15 @@ void Flight::flight_task(void *pvParameters)
     }
 }
 
+/**
+ * @brief 
+ *      1. FlightTask을 생성하여 Core 1에 전적 격리 구동
+ *     2. 최상위 우선순위(configMAX_PRIORITIES - 1)로 가용한 최고 권력을 할당하여 안정적인 실시간 제어 보장
+ *     3. TaskFunction_t 형식의 함수 포인터로 flight_task를 지정하여 태스크의 실행 루틴으로 설정
+ *     4. 태스크 이름은 "flight_task"로 지정하여 디버깅 및 모니터링 시 식별 용이
+ *     5. 스택 크기는 8192 바이트로 충분히 할당
+ * @return esp_err_t 
+ */
 esp_err_t  Flight::StartTask()
 {
     // 최상위 우선순위(configMAX_PRIORITIES - 1)로 가용한 최고 권력을 할당하여 Core 1에 전적 격리 구동
@@ -437,6 +446,13 @@ esp_err_t  Flight::StartTask()
     return ESP_OK;
 }
 
+/**
+ * @brief 
+ *      주어진 자기장 벡터를 지정된 각도만큼 회전시킵니다.
+ * @param raw_mag 
+ * @param rot_rad 
+ * @return Vector3f 
+ */
 Vector3f Flight::rotateMagVector(const Vector3f& raw_mag, float rot_rad) {
     Vector3f corrected_mag{0.0f, 0.0f, 0.0f};
 
