@@ -37,14 +37,14 @@ private:
     SharedDataManager(){}
     // [Writers 제약 조건] 
     // 본 더블 버퍼 구조는 각 Data_type별로 데이터를 쓰는 태스크(Writer)가 '단 1개'일 때만 원자성이 보장됩니다.
-    SensorData      _imu_buffer[2]       = {};
-    BaroData        _baro_buffer[2]      = {};
-    Attitude_t      _currentAttitude[2]  = {};
-    Attitude_t      _targetAttitude[2]   = {}; 
-    QgcAttitude_t   _qgcAttitude[2]      = {}; // MAVLINK로 QGC에 ATTITUDE/SPEED를 위하여 전송 
-    gps_data_t      _gps_buffer[2]       = {};    
-    Vector3f        _mag_buffer[2]       = {};
-    rc_data_t       _rc_buffer[2]        = {};
+    SensorData      _imu_buffer[2]      = {};
+    BaroData        _baro_buffer[2]     = {};
+    Attitude_t      _curAttBuffer[2]    = {};
+    Attitude_t      _tarAttBuffer[2]    = {}; 
+    QgcAttitude_t   _qgcAttBuffer[2]    = {}; // MAVLINK로 QGC에 ATTITUDE/SPEED를 위하여 전송 
+    gps_data_t      _gps_buffer[2]      = {};    
+    Vector3f        _mag_buffer[2]      = {};
+    rc_data_t       _rc_buffer[2]       = {};
 
     std::atomic<int> _imu_latest_idx{0};
     std::atomic<int> _baro_latest_idx{0};
@@ -109,15 +109,15 @@ public:
             _is_baro_updated.store(true, std::memory_order_release); // 💡 게시 시 플래그 연동 자동화            
         } else if constexpr (TypeEnum == Data_type::DT_CURRENT_ATTITUDE) {
             int write_idx = 1 - _curatt_latest_idx.load(std::memory_order_relaxed);
-            _currentAttitude[write_idx] = new_data; 
+            _curAttBuffer[write_idx] = new_data; 
             _curatt_latest_idx.store(write_idx, std::memory_order_release);
         } else if constexpr (TypeEnum == Data_type::DT_TARGET_ATTITUDE) {
             int write_idx = 1 - _taratt_latest_idx.load(std::memory_order_relaxed);
-            _targetAttitude[write_idx] = new_data; 
+            _tarAttBuffer[write_idx] = new_data; 
             _taratt_latest_idx.store(write_idx, std::memory_order_release);
         } else if constexpr (TypeEnum == Data_type::DT_QGC_ATTITUDE) {
             int write_idx = 1 - _qgcatt_latest_idx.load(std::memory_order_relaxed);
-            _qgcAttitude[write_idx] = new_data; 
+            _qgcAttBuffer[write_idx] = new_data; 
             _qgcatt_latest_idx.store(write_idx, std::memory_order_release);
         } else if constexpr (TypeEnum == Data_type::DT_GPS_DATA) {
             int write_idx = 1 - _gps_latest_idx.load(std::memory_order_relaxed);
@@ -146,13 +146,13 @@ public:
             return _baro_buffer[read_idx];
         } else if constexpr (TypeEnum == Data_type::DT_CURRENT_ATTITUDE) {
             int read_idx = _curatt_latest_idx.load(std::memory_order_acquire);
-            return _currentAttitude[read_idx]; 
+            return _curAttBuffer[read_idx]; 
         } else if constexpr (TypeEnum == Data_type::DT_TARGET_ATTITUDE) {
             int read_idx = _taratt_latest_idx.load(std::memory_order_acquire);
-            return _targetAttitude[read_idx]; 
+            return _tarAttBuffer[read_idx]; 
         } else if constexpr (TypeEnum == Data_type::DT_QGC_ATTITUDE) {
             int read_idx = _qgcatt_latest_idx.load(std::memory_order_acquire);
-            return _qgcAttitude[read_idx]; 
+            return _qgcAttBuffer[read_idx]; 
         } else if constexpr (TypeEnum == Data_type::DT_GPS_DATA) {
             int read_idx = _gps_latest_idx.load(std::memory_order_acquire);
             return _gps_buffer[read_idx]; 

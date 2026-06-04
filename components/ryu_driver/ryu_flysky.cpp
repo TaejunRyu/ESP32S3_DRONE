@@ -186,17 +186,26 @@ void Flysky::flysky_rx_task(void* arg) {
                             if (sensor->parse_ibus_packet(packet, IBUS_PACKET_SIZE) == ESP_OK) {
                                 rc_data_t rc_data{};
                                 const uint16_t *channel = sensor->get_all_channels();
-                                rc_data.roll    = channel[0] - 1500;
-                                rc_data.pitch   = channel[1] - 1500;
-                                rc_data.yaw     = channel[3] - 1500;
-                                rc_data.throttle= channel[2] - 1000;
-                                rc_data.aux1    = channel[4] - 1000;
-                                rc_data.aux2    = channel[5] - 1000;
-                                rc_data.aux3    = channel[6] - 1000;
-                                rc_data.aux4    = channel[7] - 1000;
+                                rc_data.roll    = (channel[0] - 1500) * 0.2f;   // 스틱 입력을 -100 ~ 100 범위로 매핑
+                                rc_data.pitch   = (channel[1] - 1500) * 0.2f;
+                                rc_data.yaw     = (channel[3] - 1500) * 0.2f;
+
+                                rc_data.throttle= (channel[2] - 1000) * 0.1f;   // 스로틀은 0 ~ 100 범위로 매핑
+                                
+                                rc_data.aux1    = (channel[4] - 1000) * 0.1f;   // 보조 채널은 0 ~ 100 범위로 매핑 (예: 스위치 조작 등)
+                                rc_data.aux2    = (channel[5] - 1000) * 0.1f;
+                                rc_data.aux3    = (channel[6] - 1000) * 0.1f;
+                                rc_data.aux4    = (channel[7] - 1000) * 0.1f;
                                 rc_data.type     = RC_FLYSKY;
                                 Controller::SharedDataManager::getInstance().publish_data<Controller::Data_type::DT_RC_DATA>(rc_data);
                                 Controller::SharedDataManager::getInstance().set_rc_updated(true); // RC 데이터 업데이트 플래그 세트
+
+                                // ctrl.roll     = (ibus.channels[0] - 1500) * 0.06f;  // +/- 30도 범위
+                                // ctrl.pitch    = (ibus.channels[1] - 1500) * 0.06f;
+                                // ctrl.throttle = (ibus.channels[2] - 1000) / 1000.0f; // 0.0 ~ 1.0
+                                // ctrl.yaw      = (ibus.channels[3] - 1500) * 0.1f;
+                                // ctrl.arming   = (ibus.channels[4] > 1500);           // 스위치 기준
+
                                 // ESP_LOGD(TAG, "iBUS channels: %u %u %u %u",
                                 //         rc_data.roll, rc_data.pitch,
                                 //         rc_data.throttle, rc_data.yaw);
@@ -218,89 +227,3 @@ void Flysky::flysky_rx_task(void* arg) {
 }
 
 } // namespace Drivers
-
-
-
-// #ifndef IBUS_HANDLER_H
-// #define IBUS_HANDLER_H
-
-// #include <stdint.h>
-
-// // iBUS 프레임 구조 (32 Bytes)
-// // [0]: 0x20 (Length)
-// // [1]: 0x40 (Command)
-// // [2-3]: Ch1 (Little Endian) ... [30-31]: Checksum
-// struct IBusFrame {
-//     uint16_t channels[14];
-// };
-
-// class IBusParser {
-// public:
-//     static bool parse(uint8_t* data, IBusFrame* frame) {
-//         if (data[0] != 0x20 || data[1] != 0x40) return false;
-
-//         // 체크섬 계산
-//         uint16_t checksum = 0xFFFF;
-//         for (int i = 0; i < 30; i++) checksum -= data[i];
-        
-//         uint16_t rxChecksum = data[30] | (data[31] << 8);
-//         if (checksum != rxChecksum) return false;
-
-//         // 채널 데이터 추출 (1000 ~ 2000 범위)
-//         for (int i = 0; i < 14; i++) {
-//             frame->channels[i] = data[i * 2 + 2] | (data[i * 2 + 3] << 8);
-//         }
-//         return true;
-//     }
-// };
-
-// #endif
-
-
-
-
-
-// #include "driver/uart.h"
-// #include "BridgeManager.h" // 이전 단계에서 만든 ESP-NOW 관리 클래스
-// #include "IBusHandler.h"
-
-// #define IBUS_RX_PIN 18  // FS-iA6B 등 수신기의 Servo/iBUS 핀 연결
-// #define BUF_SIZE    128
-
-// void bridge_task(void *pvParameters) {
-//     auto bridge = BridgeManager::getInstance();
-    
-//     // UART 초기화 (iBUS: 115200bps, 8N1)
-//     uart_config_t uart_config = {
-//         .baud_rate = 115200,
-//         .data_bits = UART_DATA_8_BITS,
-//         .parity = UART_PARITY_DISABLE,
-//         .stop_bits = UART_STOP_BITS_1,
-//         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
-//     };
-//     uart_param_config(UART_NUM_1, &uart_config);
-//     uart_set_pin(UART_NUM_1, UART_PIN_NO_CHANGE, IBUS_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-//     uart_driver_install(UART_NUM_1, BUF_SIZE * 2, 0, 0, NULL, 0);
-
-//     uint8_t data[BUF_SIZE];
-//     IBusFrame ibus;
-//     ControlData ctrl;
-
-//     while (1) {
-//         int len = uart_read_bytes(UART_NUM_1, data, 32, pdMS_TO_TICKS(10));
-        
-//         if (len >= 32 && IBusParser::parse(data, &ibus)) {
-//             // iBUS 채널(1000~2000)을 드론 제어값으로 매핑
-//             // Ch1:Roll, Ch2:Pitch, Ch3:Throttle, Ch4:Yaw, Ch5:Arming(SWA 등)
-            
-//             ctrl.roll     = (ibus.channels[0] - 1500) * 0.06f;  // +/- 30도 범위
-//             ctrl.pitch    = (ibus.channels[1] - 1500) * 0.06f;
-//             ctrl.throttle = (ibus.channels[2] - 1000) / 1000.0f; // 0.0 ~ 1.0
-//             ctrl.yaw      = (ibus.channels[3] - 1500) * 0.1f;
-//             ctrl.arming   = (ibus.channels[4] > 1500);           // 스위치 기준
-
-//             // ESP-NOW 전송
-//             bridge->sendToDrone(ctrl);
-//         }
-//     }
-// }
